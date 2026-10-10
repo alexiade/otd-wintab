@@ -9,6 +9,8 @@
  * version 2.1 of the License, or (at your option) any later version.
  */
 
+#include <string.h>
+
 #include "wine_compat.h"
 #include "gtk_glue.h"
 #include "iat.h"
@@ -95,6 +97,53 @@ void *gtk_glue_fix_associated(struct gtk_glue *glue, void *device, void *associa
     return api->seat_get_pointer(seat);
 }
 
+int gtk_glue_event_axis(struct gtk_glue *glue, const void *event, int use, double *value)
+{
+    const struct gtk_api *api = &glue->api;
+    void *source;
+    double *axes;
+    size_t len;
+    int type, i, n;
+
+    if (!event || use == GLUE_AXIS_X || use == GLUE_AXIS_Y)   /* window coordinates */
+        return api->event_get_axis(event, use, value);
+
+    type = *(const int *)event;
+    if (type < GLUE_EVENT_MOTION_NOTIFY || type > GLUE_EVENT_BUTTON_RELEASE)
+        return api->event_get_axis(event, use, value);
+
+    source = api->event_get_source_device(event);
+    if (!source || api->device_get_device_type(source) != GLUE_DEVICE_TYPE_FLOATING)
+        return api->event_get_axis(event, use, value);
+
+    axes = *(double *const *)((const char *)event + GLUE_EVENT_AXES_OFFSET);
+    len = axes ? api->msize(axes) / sizeof(double) : 0;
+
+    /* the array is laid out by the source (Wintab) device, possibly cut
+     * short by a copy */
+    n = api->device_get_n_axes(source);
+    for (i = 0; i < n && i < GLUE_MAX_AXES; i++)
+    {
+        double state[GLUE_MAX_AXES];
+        void *window;
+
+        if (api->device_get_axis_use(source, i) != use) continue;
+        if ((size_t)i < len)
+        {
+            if (value) *value = axes[i];
+            return 1;
+        }
+        /* a short copy: the pen's current state, from its latest packet */
+        window = *(void *const *)((const char *)event + GLUE_EVENT_WINDOW_OFFSET);
+        if (!window) break;
+        memset(state, 0, sizeof(state));
+        api->device_get_state(source, window, state, NULL);
+        if (value) *value = state[i];
+        return 1;
+    }
+    return api->event_get_axis(event, use, value);
+}
+
 /* ---- runtime binding to the GTK in this process ----------------------- */
 
 static struct gtk_glue the_glue;
@@ -131,6 +180,38 @@ static void *get_associated_device_hook(void *device)
                                    the_glue.api.device_get_associated_device(device));
 }
 
+static int event_get_axis_hook(const void *event, int use, double *value)
+{
+    return gtk_glue_event_axis(&the_glue, event, use, value);
+}
+
+/* _msize of the C runtime GLib's g_malloc uses: the one GLib imports
+ * malloc from (the UCRT for current builds, msvcrt for old ones) */
+static FARPROC crt_msize_for_glib(HMODULE glib)
+{
+    static const char *const crts[] = { "ucrtbase.dll", "api-ms-win-crt-heap-l1-1-0.dll", "msvcrt.dll" };
+    BYTE *base = (BYTE *)glib;
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+    IMAGE_DATA_DIRECTORY *dir = &nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    IMAGE_IMPORT_DESCRIPTOR *imp;
+    size_t i;
+
+    if (!dir->VirtualAddress) return NULL;
+    for (imp = (IMAGE_IMPORT_DESCRIPTOR *)(base + dir->VirtualAddress); imp->Name; imp++)
+    {
+        const char *name = (const char *)(base + imp->Name);
+        for (i = 0; i < ARRAYSIZE(crts); i++)
+        {
+            HMODULE crt;
+            if (_stricmp(name, crts[i])) continue;
+            /* api sets resolve to ucrtbase */
+            crt = GetModuleHandleA(i == 1 ? "ucrtbase.dll" : name);
+            if (crt) return GetProcAddress(crt, "_msize");
+        }
+    }
+    return NULL;
+}
+
 static BOOL bind(struct gtk_api *api)
 {
     HMODULE gdk = GetModuleHandleA("libgdk-3-0.dll");
@@ -147,6 +228,12 @@ static BOOL bind(struct gtk_api *api)
     BIND(seat_get_pointer, gdk, "gdk_seat_get_pointer");
     BIND(device_get_associated_device, gdk, "gdk_device_get_associated_device");
     BIND(device_get_device_type, gdk, "gdk_device_get_device_type");
+    BIND(device_get_n_axes, gdk, "gdk_device_get_n_axes");
+    BIND(event_get_axis, gdk, "gdk_event_get_axis");
+    BIND(event_get_source_device, gdk, "gdk_event_get_source_device");
+    BIND(device_get_axis_use, gdk, "gdk_device_get_axis_use");
+    BIND(device_get_state, gdk, "gdk_device_get_state");
+    if (!(*(FARPROC *)&api->msize = crt_msize_for_glib(glib))) return FALSE;
     BIND(list_free, glib, "g_list_free");
     BIND(list_append, glib, "g_list_append");
     BIND(timeout_add, glib, "g_timeout_add");
@@ -176,6 +263,8 @@ void gtk_glue_start(void)
                                "gdk_seat_get_slaves", (void *)seat_get_slaves_hook);
     wrapped += iat_patch_module(GetModuleHandleW(NULL), "libgdk-3-0.dll",
                                 "gdk_device_get_associated_device", (void *)get_associated_device_hook);
+    wrapped += iat_patch_module(GetModuleHandleW(NULL), "libgdk-3-0.dll",
+                                "gdk_event_get_axis", (void *)event_get_axis_hook);
     TRACE("GTK glue active, %d import(s) wrapped\n", wrapped);
     /* g_timeout_add/g_idle_add are thread-safe; callbacks run on the main loop */
     the_glue.api.timeout_add(250, scan_tick, NULL);

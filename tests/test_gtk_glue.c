@@ -10,6 +10,7 @@
  */
 
 #include <stdarg.h>
+#include <stddef.h>
 #include <stdlib.h>
 
 #include "harness.h"
@@ -198,6 +199,127 @@ void glue_fixes_associated_device(void)
     no_display = TRUE;
     CHECK(gtk_glue_fix_associated(&g, &mouse_obj, &pen_obj) == &pen_obj, "without a display, unchanged");
     no_display = FALSE;
+}
+
+/* ---- gdk_event_get_axis through the source device ---------------------- */
+
+/* the start of a GdkEventMotion, as laid out on this platform */
+struct fake_motion
+{
+    int type;
+    void *window;
+    signed char send_event;
+    unsigned time;
+    double x, y;
+    double *axes;
+};
+
+static int real_axis_calls;
+static size_t axes_alloc_len;       /* what _msize reports, in doubles */
+static void *event_source;
+
+static int fake_event_get_axis(const void *event, int use, double *value)
+{
+    real_axis_calls++;
+    return 0;                       /* the core pointer has no such axis */
+}
+static void *fake_event_get_source_device(const void *e) { return event_source; }
+/* the pen: x, y, pressure, xtilt, ytilt, wheel */
+static int fake_axis_use(void *d, unsigned i) { static const int uses[] = { 1, 2, 3, 4, 5, 6 }; return uses[i]; }
+static int fake_n_axes_pen(void *d) { return d == &pen_obj ? 6 : 2; }
+static size_t fake_msize(void *p) { return axes_alloc_len * sizeof(double); }
+static int state_calls;
+static void *state_window;
+static void fake_get_state(void *d, void *window, double *axes, int *mask)
+{
+    static const double latest[6] = { 11, 21, 0.42, 0.2, 0.1, 0.7 };
+    state_calls++;
+    state_window = window;
+    memcpy(axes, latest, sizeof(latest));
+}
+
+static void axis_glue(struct gtk_glue *g)
+{
+    fake_glue(g);
+    g->api.event_get_axis = fake_event_get_axis;
+    g->api.event_get_source_device = fake_event_get_source_device;
+    g->api.device_get_axis_use = fake_axis_use;
+    g->api.device_get_n_axes = fake_n_axes_pen;
+    g->api.device_get_device_type = fake_device_type;
+    g->api.msize = fake_msize;
+    g->api.device_get_state = fake_get_state;
+}
+
+void glue_event_axis_reads_through_the_source(void)
+{
+    struct gtk_glue g;
+    double axes[6] = { 10, 20, 0.61, 0.1, -0.2, 0.5 };
+    struct fake_motion ev = { 3 /* motion */ };
+    double v = 0;
+
+    CHECK(offsetof(struct fake_motion, axes) == GLUE_EVENT_AXES_OFFSET, "GdkEventMotion layout");
+    axis_glue(&g);
+    ev.axes = axes;
+    event_source = &pen_obj;
+    axes_alloc_len = 6;
+
+    /* the core pointer has lost the pen's axes, but the event has them */
+    CHECK(gtk_glue_event_axis(&g, &ev, 3 /* pressure */, &v) && v == 0.61, "pressure %f", v);
+    CHECK(gtk_glue_event_axis(&g, &ev, 6 /* wheel */, &v) && v == 0.5, "wheel %f", v);
+    CHECK_EQ_U(real_axis_calls, 0);
+
+    ev.type = 4;                    /* button press: same layout */
+    CHECK(gtk_glue_event_axis(&g, &ev, 4 /* xtilt */, &v) && v == 0.1, "xtilt on a press");
+}
+
+void glue_event_axis_respects_short_copies(void)
+{
+    struct gtk_glue g;
+    double axes[2] = { 10, 20 };    /* copied while the core pointer had X, Y */
+    static int window_obj;
+    struct fake_motion ev = { 3 };
+    double v = 0;
+
+    axis_glue(&g);
+    ev.axes = axes;
+    ev.window = &window_obj;
+    event_source = &pen_obj;
+    axes_alloc_len = 2;
+
+    /* nothing is read past the copy; the pen's latest state stands in */
+    CHECK(gtk_glue_event_axis(&g, &ev, 3, &v) && v == 0.42, "pressure from the pen's state: %f", v);
+    CHECK_EQ_U(state_calls, 1);
+    CHECK(state_window == &window_obj, "state asked for the event's window");
+    CHECK_EQ_U(real_axis_calls, 0);
+
+    ev.window = NULL;               /* no window: leave it to GDK */
+    CHECK(!gtk_glue_event_axis(&g, &ev, 3, &v), "falls back without a window");
+    CHECK_EQ_U(real_axis_calls, 1);
+}
+
+void glue_event_axis_leaves_other_events_alone(void)
+{
+    struct gtk_glue g;
+    double axes[6] = { 0 };
+    struct fake_motion ev = { 3 };
+    double v;
+
+    axis_glue(&g);
+    ev.axes = axes;
+    axes_alloc_len = 6;
+
+    event_source = &pen_obj;
+    gtk_glue_event_axis(&g, &ev, 1 /* X: window coordinates */, &v);
+    CHECK_EQ_U(real_axis_calls, 1);
+
+    event_source = &mouse_obj;      /* a slave: the system mouse */
+    gtk_glue_event_axis(&g, &ev, 3, &v);
+    CHECK_EQ_U(real_axis_calls, 2);
+
+    event_source = &pen_obj;
+    ev.type = 10;                   /* enter-notify */
+    gtk_glue_event_axis(&g, &ev, 3, &v);
+    CHECK_EQ_U(real_axis_calls, 3);
 }
 
 /* import patching redirects calls made through the import table */

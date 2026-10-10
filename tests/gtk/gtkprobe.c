@@ -31,7 +31,8 @@
 typedef int gboolean;
 typedef struct _GList { void *data; struct _GList *next, *prev; } GList;
 
-enum { GDK_MOTION_NOTIFY = 3, GDK_BUTTON_PRESS = 4, GDK_BUTTON_RELEASE = 7 };
+enum { GDK_MOTION_NOTIFY = 3, GDK_BUTTON_PRESS = 4, GDK_BUTTON_RELEASE = 7,
+       GDK_ENTER_NOTIFY = 10, GDK_LEAVE_NOTIFY = 11 };
 enum { GDK_MODE_DISABLED = 0, GDK_MODE_SCREEN = 1 };
 enum { GDK_DEVICE_TYPE_MASTER = 0, GDK_DEVICE_TYPE_SLAVE = 1, GDK_DEVICE_TYPE_FLOATING = 2 };
 enum { GDK_SOURCE_MOUSE = 0, GDK_SOURCE_PEN = 1, GDK_SOURCE_ERASER = 2, GDK_SOURCE_CURSOR = 3,
@@ -52,6 +53,8 @@ void      gtk_widget_show_all(void *widget);
 void     *gtk_widget_get_window(void *widget);
 gboolean  gtk_events_pending(void);
 gboolean  gtk_main_iteration_do(gboolean blocking);
+void     *gtk_drawing_area_new(void);
+void      gtk_container_add(void *container, void *widget);
 
 void     *gdk_display_get_default(void);
 void     *gdk_display_get_default_seat(void *display);
@@ -59,6 +62,10 @@ void     *gdk_seat_get_pointer(void *seat);
 GList    *gdk_seat_get_slaves(void *seat, int capabilities);
 void     *gdk_event_get_source_device(const void *event);
 int       gdk_event_get_event_type(const void *event);
+void     *gdk_event_get_device(const void *event);
+int       gdk_seat_grab(void *seat, void *window, int capabilities, gboolean owner_events,
+                        void *cursor, const void *event, void *prepare_func, void *prepare_data);
+void      gdk_seat_ungrab(void *seat);
 gboolean  gdk_event_get_axis(const void *event, int axis, double *value);
 const char *gdk_device_get_name(void *device);
 int       gdk_device_get_mode(void *device);
@@ -66,6 +73,8 @@ gboolean  gdk_device_set_mode(void *device, int mode);
 int       gdk_device_get_device_type(void *device);
 int       gdk_device_get_source(void *device);
 void     *gdk_device_get_associated_device(void *device);
+int       gdk_device_get_n_axes(void *device);
+int       gdk_device_get_axis_use(void *device, unsigned index);
 int       gdk_window_get_origin(void *window, int *x, int *y);
 int       gdk_window_get_scale_factor(void *window);
 
@@ -94,6 +103,9 @@ struct step_stats
     double hover_wheel_min, hover_wheel_max, down_wheel_min, down_wheel_max;
     int hover_wheel_n, down_wheel_n;
     int pen_events_down, core_events_down;  /* while the OS button is held */
+    int switches_during_stroke;             /* current device changed under a grab */
+    BOOL second_stroke;                     /* pen_two_strokes(): in the second contact */
+    int second_with_pressure, second_without_pressure;
 };
 static struct step_stats st;
 
@@ -141,19 +153,56 @@ static void *device_from_event(const void *event)
     }
 }
 
+static void *window_widget;
+static void *grab_pointer;          /* shell->grab_pointer: the event's (master) device */
+
+#define EVLOG 600
+static char evlog[EVLOG][160];
+static int nevlog;
+static void record_event(const char *line)
+{
+    if (nevlog < EVLOG) strcpy(evlog[nevlog++], line);
+}
+
+static void dump_events(void)
+{
+    int i, run = 1;
+    for (i = 0; i < nevlog; i++)
+    {
+        if (i + 1 < nevlog && !strcmp(evlog[i], evlog[i + 1])) { run++; continue; }
+        printf("      %3dx %s\n", run, evlog[i]);
+        run = 1;
+    }
+}
+
 static gboolean on_event(void *widget, void *event, void *data)
 {
     int type = gdk_event_get_event_type(event);
     void *d;
     double v;
+    BOOL pointer_event = type == GDK_MOTION_NOTIFY || type == GDK_BUTTON_PRESS ||
+                         type == GDK_BUTTON_RELEASE || type == GDK_ENTER_NOTIFY ||
+                         type == GDK_LEAVE_NOTIFY;
 
-    if (type != GDK_MOTION_NOTIFY && type != GDK_BUTTON_PRESS && type != GDK_BUTTON_RELEASE)
-        return FALSE;
-    if (verbose)
-        printf("      %-8s source=%s\n", type == GDK_MOTION_NOTIFY ? "motion" :
-               type == GDK_BUTTON_PRESS ? "press" : "release",
-               gdk_event_get_source_device(event) ?
-               gdk_device_get_name(gdk_event_get_source_device(event)) : "(none)");
+    if (!pointer_event) return FALSE;
+    {
+        /* kept in memory and printed only for a failing step, so the
+         * timing isn't disturbed by console output */
+        char line[160], uses[16] = "";
+        double p = -1;
+        void *dev = gdk_event_get_device(event), *src = gdk_event_get_source_device(event);
+        int i, nd = dev ? gdk_device_get_n_axes(dev) : -1;
+        for (i = 0; i < nd && i < 8; i++) uses[i] = '0' + gdk_device_get_axis_use(dev, i);
+        gdk_event_get_axis(event, GDK_AXIS_PRESSURE, &p);
+        snprintf(line, sizeof(line), "%-8s source=%-36s p=%5.2f dev[%s] src=%d%s%s",
+                 type == GDK_MOTION_NOTIFY ? "motion" : type == GDK_BUTTON_PRESS ? "press" :
+                 type == GDK_BUTTON_RELEASE ? "release" : type == GDK_ENTER_NOTIFY ? "enter" : "leave",
+                 src ? gdk_device_get_name(src) : "(none)", p, uses,
+                 src ? gdk_device_get_n_axes(src) : -1,
+                 grab_source ? "  [grabbed]" : "", os_button_down ? "  [os button]" : "");
+        record_event(line);
+        if (verbose) printf("      %s\n", line);
+    }
     if (!(d = device_from_event(event))) return FALSE;
 
     if (os_button_down)
@@ -162,31 +211,56 @@ static gboolean on_event(void *widget, void *event, void *data)
         else st.pen_events_down++;
     }
 
-    /* while a stroke holds the grab, other devices are ignored */
-    if (grab_source && d != grab_source)
+    /* gimp_display_shell_check_device(): while a stroke holds the grab,
+     * ignore events whose master *and* source both differ (in practice the
+     * master is always the core pointer, so nothing is ignored) */
+    if (grab_source && grab_pointer && grab_pointer != gdk_event_get_device(event) &&
+        grab_source != d)
     {
         ignored_while_grabbed++;
         return FALSE;
     }
 
-    /* gimp_devices_check_change(): unknown devices keep the current one */
+    /* gimp_devices_check_change(): unknown devices keep the current one;
+     * GIMP checks on every canvas event, crossings included */
     if (is_known(d) && d != current)
+    {
+        if (grab_source) st.switches_during_stroke++;
         current = d;
+    }
 
     if (type == GDK_BUTTON_PRESS)
     {
-        grab_source = d;
+        /* gimp_display_shell_pointer_grab() */
+        if (!grab_source)
+        {
+            gdk_seat_grab(seat, gtk_widget_get_window(window_widget), 7 /* ALL_POINTING */, FALSE,
+                          NULL, event, NULL, NULL);
+            grab_pointer = gdk_event_get_device(event);
+            grab_source = d;
+        }
         st.presses++;
         st.pressed_on = d;
     }
     else if (type == GDK_BUTTON_RELEASE)
     {
-        if (d == grab_source) grab_source = NULL;
+        if (grab_source)
+        {
+            gdk_seat_ungrab(seat);
+            grab_source = grab_pointer = NULL;
+        }
         st.releases++;
     }
-    else
+    else if (type == GDK_MOTION_NOTIFY)
         st.motions++;
+    else
+        return FALSE;
 
+    if (st.second_stroke && type == GDK_MOTION_NOTIFY)
+    {
+        if (gdk_event_get_axis(event, GDK_AXIS_PRESSURE, &v) && v > 0.1) st.second_with_pressure++;
+        else st.second_without_pressure++;
+    }
     if (gdk_event_get_axis(event, GDK_AXIS_PRESSURE, &v) && v > st.max_pressure) st.max_pressure = v;
     if (gdk_event_get_axis(event, GDK_AXIS_WHEEL, &v))
     {
@@ -232,10 +306,11 @@ static void mouse_to(int x, int y)
 }
 
 /* OpenTabletDriver's tip binding: the real left mouse button follows the tip */
+static BOOL no_os_button;           /* OTD_GTKPROBE_NO_OSBUTTON=1: diagnose without it */
 static void os_button(BOOL down)
 {
     INPUT in = {0};
-    if (down == os_button_down) return;
+    if (no_os_button || down == os_button_down) return;
     in.type = INPUT_MOUSE;
     in.mi.dwFlags = down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
     SendInput(1, &in, sizeof(in));
@@ -309,6 +384,33 @@ static void pen_stroke(const struct tool *t, BOOL lift_tip)
     pump(150);
 }
 
+/* two strokes without leaving proximity: lift the tip, hover, touch again */
+static void pen_two_strokes(const struct tool *t)
+{
+    int s, i, x = win_x + 150, y = win_y + 120;
+
+    mouse_to(x, y);
+    pen(OTDWT_EV_PROXIMITY_IN, t, x, y, 0);
+    pump(60);
+    for (s = 0; s < 2; s++)
+    {
+        for (i = 0; i < 16; i++)
+        {
+            BOOL down = i >= 3 && i < 13;
+            x += 6; y += 2;
+            mouse_to(x, y);
+            pen(OTDWT_EV_PACKET, t, x, y, down ? 20000 : 0);
+            os_button(down);
+            st.second_stroke = s == 1 && down;
+            pump(15);
+        }
+        st.second_stroke = FALSE;
+        pump(100);              /* hovering between the strokes */
+    }
+    pen(OTDWT_EV_PROXIMITY_OUT, t, x, y, 0);
+    pump(150);
+}
+
 /* the Art Pen turning its barrel: hovering, then with the tip down */
 static void art_pen_twisting(void)
 {
@@ -341,7 +443,11 @@ static void expect_current(const char *step, const char *substr, void *exact)
 {
     BOOL ok = exact ? current == exact : (current && strstr(name_of(current), substr) != NULL);
     printf("%-44s current: %-40s %s\n", step, name_of(current), ok ? "ok" : "FAILED");
-    if (!ok) failures++;
+    if (!ok)
+    {
+        failures++;
+        dump_events();
+    }
 }
 
 static void expect(BOOL cond, const char *what)
@@ -350,10 +456,11 @@ static void expect(BOOL cond, const char *what)
     {
         printf("    FAILED: %s\n", what);
         failures++;
+        dump_events();
     }
 }
 
-static void begin(void) { memset(&st, 0, sizeof(st)); }
+static void begin(void) { memset(&st, 0, sizeof(st)); nevlog = 0; }
 
 int main(void)
 {
@@ -364,6 +471,7 @@ int main(void)
     setvbuf(stdout, NULL, _IONBF, 0);
     GetCursorPos(&saved);
     verbose = GetEnvironmentVariableA("OTD_GTKPROBE_VERBOSE", NULL, 0) > 0;
+    no_os_button = GetEnvironmentVariableA("OTD_GTKPROBE_NO_OSBUTTON", NULL, 0) > 0;
 
     /* the producer side first, so the provider attaches immediately */
     if (!ring_create(&ring))
@@ -388,13 +496,17 @@ int main(void)
     g_list_free(slaves);
     g_signal_connect_data(seat, "device-added", (void *)device_added, NULL, NULL, 0);
 
+    /* like GIMP's image window: the canvas is a child widget with its own
+     * GdkWindow, and that is what a stroke grabs */
     window = gtk_window_new(0);
     gtk_window_set_title(window, "otd-wintab GTK test");
     gtk_window_set_default_size(window, 640, 420);
     gtk_window_move(window, 80, 80);
     gtk_window_set_keep_above(window, TRUE);
-    gtk_widget_add_events(window, GDK_ALL_EVENTS_MASK);
-    g_signal_connect_data(window, "event", (void *)on_event, NULL, NULL, 0);
+    window_widget = gtk_drawing_area_new();
+    gtk_container_add(window, window_widget);
+    gtk_widget_add_events(window_widget, GDK_ALL_EVENTS_MASK);
+    g_signal_connect_data(window_widget, "event", (void *)on_event, NULL, NULL, 0);
     gtk_widget_show_all(window);
     gtk_window_present(window);
     pump(500);
@@ -412,7 +524,9 @@ int main(void)
     expect(st.max_pressure > 0.1, "pressure reaches the application");
     expect(st.pen_events_down > 0 && st.core_events_down == 0,
            "while the tip is down, events come from the pen, not the core pointer");
-    printf("    tip down: %d pen events, %d core pointer events\n", st.pen_events_down, st.core_events_down);
+    printf("    tip down: %d pen events, %d core pointer events, %d device switches under the grab\n",
+           st.pen_events_down, st.core_events_down, st.switches_during_stroke);
+    expect(st.switches_during_stroke == 0, "the stroke stays on the pen");
 
     begin(); mouse_wiggle();
     expect_current("pen lifted, mouse moves", NULL, core_pointer);
@@ -435,6 +549,13 @@ int main(void)
     begin(); pen_stroke(&ERASER, TRUE);
     expect_current("eraser end", "Grip Pen Eraser #0000A001", NULL);
 
+    begin(); pen_two_strokes(&GRIP);
+    expect_current("two strokes in one proximity", "Grip Pen #0000A001", NULL);
+    printf("    second stroke: %d motion events with pressure, %d without\n",
+           st.second_with_pressure, st.second_without_pressure);
+    expect(st.second_with_pressure > 0 && st.second_without_pressure == 0,
+           "the second stroke keeps its pressure");
+
     begin(); art_pen_twisting();
     expect_current("art pen twisting", "6D Art Pen #0000C003", NULL);
     printf("    rotation (Wheel axis) hovering: %d events, %.3f..%.3f; tip down: %d events, %.3f..%.3f\n",
@@ -444,6 +565,9 @@ int main(void)
            "rotation changes while hovering");
     expect(st.down_wheel_n > 0 && st.down_wheel_max - st.down_wheel_min > 0.1,
            "rotation keeps changing with the tip down");
+    expect(st.switches_during_stroke == 0, "the art pen stroke stays on the pen");
+    printf("    tip down: %d pen events, %d core pointer events, %d device switches under the grab\n",
+           st.pen_events_down, st.core_events_down, st.switches_during_stroke);
 
     begin(); mouse_wiggle();
     expect_current("mouse at the end", NULL, core_pointer);

@@ -76,4 +76,4 @@ $env:OTD_WINTAB_INSTANCE = "gtkprobe-$PID"
 Remove-Item Env:OTD_WINTAB_FAKE -ErrorAction SilentlyContinue
 if ($Log) { $env:OTD_WINTAB_LOG = Join-Path $out 'gtkprobe-wintab.log' }
 & "$out\gtkprobe.exe"
-if ($LASTEXITCODE -ne 0) { throw 'GTK integration test failed' }
+exit $LASTEXITCODE

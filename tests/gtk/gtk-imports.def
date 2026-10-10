@@ -13,11 +13,16 @@ gtk_widget_show_all
 gtk_widget_get_window
 gtk_events_pending
 gtk_main_iteration_do
+gtk_drawing_area_new
+gtk_container_add
 [libgdk-3-0.dll]
 gdk_display_get_default
 gdk_display_get_default_seat
 gdk_seat_get_pointer
 gdk_seat_get_slaves
+gdk_seat_grab
+gdk_seat_ungrab
+gdk_event_get_device
 gdk_event_get_source_device
 gdk_event_get_event_type
 gdk_event_get_axis
@@ -27,6 +32,8 @@ gdk_device_set_mode
 gdk_device_get_device_type
 gdk_device_get_source
 gdk_device_get_associated_device
+gdk_device_get_n_axes
+gdk_device_get_axis_use
 gdk_window_get_origin
 gdk_window_get_scale_factor
 [libgobject-2.0-0.dll]

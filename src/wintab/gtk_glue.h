@@ -23,6 +23,23 @@
  * device never resolves to a floating (Wintab) device, but to the seat's
  * pointer.
  *
+ * And GTK 3 makes the *system pointer* the core pointer's active device
+ * whenever it synthesizes crossing events from mouse messages, which
+ * happens around grabs of child windows (GIMP's canvas) and as the cursor
+ * moves between windows, even while a pen is in use. Pen events keep the
+ * pen as source device, but the core pointer, their device, now only has X
+ * and Y: GDK sizes copies of the events' axis arrays by it (events re-routed
+ * to a grab window are copies) and gdk_event_get_axis() resolves through
+ * it, so pressure, tilt and twist vanish while contact and motion remain.
+ * GTK only re-selects the pen on a proximity-in, and the cursor keeps moving
+ * (OpenTabletDriver moves it with the pen), so there's no keeping the core
+ * pointer right from outside. Instead the application's import of
+ * gdk_event_get_axis is wrapped: for Wintab-sourced pointer events,
+ * non-positional axes are resolved through the source device. The event's
+ * axis array is read only within its actual allocation (GLib allocates it
+ * with the C runtime's malloc, so _msize knows); when a copy is short, the
+ * pen's current state is used, which GTK keeps from the latest packet.
+ *
  * Copyright 2026 otd-wintab contributors
  *
  * This library is free software; you can redistribute it and/or
@@ -54,7 +71,24 @@ struct gtk_api
     void       (*signal_emit_by_name)(void *instance, const char *signal, ...);
     unsigned   (*timeout_add)(unsigned interval_ms, int (*fn)(void *), void *data);
     unsigned   (*idle_add)(int (*fn)(void *), void *data);
+    int        (*device_get_n_axes)(void *device);
+    int        (*event_get_axis)(const void *event, int use, double *value);  /* the real one */
+    void      *(*event_get_source_device)(const void *event);
+    int        (*device_get_axis_use)(void *device, unsigned index);
+    size_t     (*msize)(void *block);      /* the C runtime GLib allocates with */
+    void       (*device_get_state)(void *device, void *window, double *axes, int *mask);
 };
+
+/* GdkEvent layout bits used (GTK 3, stable ABI): pointer events start with
+ * the type; GdkEventMotion and GdkEventButton keep the axes array right
+ * after x and y. */
+#define GLUE_EVENT_MOTION_NOTIFY    3
+#define GLUE_EVENT_BUTTON_RELEASE   7       /* 4..7: press, 2/3-press, release */
+#define GLUE_AXIS_X                 1
+#define GLUE_AXIS_Y                 2
+#define GLUE_EVENT_WINDOW_OFFSET    (sizeof(void *))
+#define GLUE_EVENT_AXES_OFFSET      (sizeof(void *) == 8 ? 40 : 32)
+#define GLUE_MAX_AXES               16
 
 #define GLUE_DEVICE_TYPE_SLAVE      1   /* GDK_DEVICE_TYPE_SLAVE */
 #define GLUE_DEVICE_TYPE_FLOATING   2   /* GDK_DEVICE_TYPE_FLOATING */
@@ -79,6 +113,10 @@ glue_list *gtk_glue_extend_slaves(struct gtk_glue *glue, glue_list *slaves, int 
 /* Given `device` and the associated device GTK reported for it, returns
  * the one the application should see (see above). */
 void *gtk_glue_fix_associated(struct gtk_glue *glue, void *device, void *associated);
+
+/* gdk_event_get_axis() resolving Wintab-sourced pointer events through
+ * their source device (see above). */
+int gtk_glue_event_axis(struct gtk_glue *glue, const void *event, int use, double *value);
 
 /* Starts the periodic scan if this process uses GTK 3. Safe to call
  * from any thread, more than once. Disabled by OTD_WINTAB_NO_GTK_GLUE=1. */

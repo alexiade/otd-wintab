@@ -694,6 +694,9 @@ void glue_skips_devices_on_seat(void);
 void glue_tolerates_missing_display(void);
 void glue_extends_seat_slaves(void);
 void glue_fixes_associated_device(void);
+void glue_event_axis_reads_through_the_source(void);
+void glue_event_axis_respects_short_copies(void);
+void glue_event_axis_leaves_other_events_alone(void);
 void iat_patch_own_import(void);
 
 #define T(fn, dll) { #fn, fn, dll }
@@ -735,6 +738,9 @@ const struct test_case test_cases[] =
     T(glue_tolerates_missing_display, FALSE),
     T(glue_extends_seat_slaves, FALSE),
     T(glue_fixes_associated_device, FALSE),
+    T(glue_event_axis_reads_through_the_source, FALSE),
+    T(glue_event_axis_respects_short_copies, FALSE),
+    T(glue_event_axis_leaves_other_events_alone, FALSE),
     T(iat_patch_own_import, FALSE),
 };
 const int test_case_count = ARRAYSIZE(test_cases);
