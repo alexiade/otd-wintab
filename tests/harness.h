@@ -96,7 +96,7 @@ extern const struct tool GRIP_PEN, GRIP_ERASER, AIRBRUSH, ART_PEN, NO_SERIAL_PEN
 
 void emit(uint32_t type, const struct tool *t, int x, int y, uint32_t pressure);
 void emit_ex(const otdwt_event *ev);
-void stroke(const struct tool *t, int npackets);  /* prox in, packets, prox out */
+void stroke(const struct tool *t, int npackets);  /* prox in, packets, tip up, prox out */
 void settle(void);                                /* let the reader catch up */
 
 /* ---- message pump ------------------------------------------------------ */

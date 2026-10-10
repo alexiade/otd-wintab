@@ -60,6 +60,7 @@ typedef struct tagWTI_CURSORS_INFO
     UINT    TYPE;
     /* otd-wintab */
     BOOL    in_proximity;
+    DWORD   last_buttons;
 } WTI_CURSORS_INFO, *LPWTI_CURSORS_INFO;
 
 typedef struct tagWTI_DEVICES_INFO
@@ -306,6 +307,7 @@ static void handle_event(const otdwt_event *ev)
     WTPACKET pkt;
     int curnum;
     BOOL was_in;
+    DWORD held;
 
     AcquireSRWLockExclusive(&cursor_lock);
     curnum = find_cursor(ev);
@@ -317,7 +319,9 @@ static void handle_event(const otdwt_event *ev)
         return;
     }
     was_in = gSysCursor[curnum].in_proximity;
+    held = gSysCursor[curnum].last_buttons;
     gSysCursor[curnum].in_proximity = ev->type != OTDWT_EV_PROXIMITY_OUT;
+    gSysCursor[curnum].last_buttons = ev->type == OTDWT_EV_PROXIMITY_OUT ? 0 : ev->buttons;
     ReleaseSRWLockExclusive(&cursor_lock);
 
     /* a packet without a prior proximity-in (e.g. we attached mid-stroke) */
@@ -325,6 +329,18 @@ static void handle_event(const otdwt_event *ev)
     {
         fill_packet(&pkt, ev, curnum);
         TABLET_DeliverPacket(&pkt, our_device, MAKELPARAM(1, 1));
+    }
+
+    /* a tool leaving with buttons still down: release them first, or the
+     * application keeps the stroke's grab and ignores all other devices */
+    if (ev->type == OTDWT_EV_PROXIMITY_OUT && was_in && held)
+    {
+        otdwt_event release = *ev;
+        release.type = OTDWT_EV_PACKET;
+        release.buttons = 0;
+        release.pressure = 0;
+        fill_packet(&pkt, &release, curnum);
+        TABLET_DeliverPacket(&pkt, our_device, 0);
     }
 
     fill_packet(&pkt, ev, curnum);

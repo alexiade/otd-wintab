@@ -361,6 +361,31 @@ static void proximity_returns_to_system_pointer(void)
     CHECK_EQ_U(log.gtk_entered_proximity, 0);
 }
 
+/* a tool that leaves with its tip still down gets a release first, or the
+ * application keeps its stroke grab and ignores every other device */
+static void proximity_out_releases_buttons(void)
+{
+    HWND hwnd = make_window();
+    struct msg_log log = {0};
+    int i;
+
+    open_context(hwnd, 0, 0, 0, 128);
+    settle();
+    emit(OTDWT_EV_PROXIMITY_IN, &GRIP_PEN, 10, 10, 0);
+    emit(OTDWT_EV_PACKET, &GRIP_PEN, 11, 11, 5000);     /* tip down */
+    emit(OTDWT_EV_PROXIMITY_OUT, &GRIP_PEN, 11, 11, 0); /* lifted, no release packet */
+    pump(&log, 300);
+
+    CHECK(log.npackets >= 2, "packets %d", log.npackets);
+    for (i = 0; i < log.npackets; i++)
+        if (log.packets[i].buttons & 1) break;
+    CHECK(i < log.npackets, "tip-down packet seen");
+    CHECK(log.npackets > 0 && log.packets[log.npackets - 1].buttons == 0,
+          "last packet before leaving releases the tip (buttons %#lx)",
+          log.npackets ? log.packets[log.npackets - 1].buttons : 0);
+    CHECK(log.npackets > 0 && log.packets[log.npackets - 1].npressure == 0, "and has no pressure");
+}
+
 /* attaching mid-stroke synthesises the missing proximity-in */
 static void proximity_synthesised_mid_stroke(void)
 {
@@ -527,14 +552,14 @@ static void context_packets_get_in_order(void)
 
     h = open_context(hwnd, 0, 0, 0, 64);
     settle();
-    stroke(&GRIP_PEN, 10);          /* 12 packets incl. proximity */
+    stroke(&GRIP_PEN, 10);          /* 13 packets: proximity, 10, tip up, proximity */
     settle();
 
     /* cMaxPkts is the buffer capacity: the provider may clear all of it */
     n1 = wt.PacketsGet(h, 5, buf);
     n2 = wt.PacketsGet(h, ARRAYSIZE(buf) - 5, buf + 5);
     CHECK_EQ_U(n1, 5);
-    CHECK_EQ_U(n2, 7);
+    CHECK_EQ_U(n2, 8);
     for (i = 1; i < n1 + n2; i++)
         CHECK(buf[i].serial == buf[i - 1].serial + 1, "serial continuity at %d", i);
     CHECK_EQ_U(wt.PacketsGet(h, 64, buf), 0);
@@ -688,6 +713,7 @@ const struct test_case test_cases[] =
     T(packets_serials_increase, TRUE),
     T(proximity_messages, TRUE),
     T(proximity_returns_to_system_pointer, TRUE),
+    T(proximity_out_releases_buttons, TRUE),
     T(proximity_synthesised_mid_stroke, TRUE),
     T(coords_gtk_identity, TRUE),
     T(coords_classic_y_up, TRUE),

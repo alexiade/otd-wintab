@@ -137,6 +137,7 @@ void stroke(const struct tool *t, int npackets)
     emit(OTDWT_EV_PROXIMITY_IN, t, 100, 200, 0);
     for (i = 1; i <= npackets; i++)
         emit(OTDWT_EV_PACKET, t, 100 + i, 200 + i, 4000 * i);
+    emit(OTDWT_EV_PACKET, t, 100 + npackets, 200 + npackets, 0);   /* tip up */
     emit(OTDWT_EV_PROXIMITY_OUT, t, 100 + npackets, 200 + npackets, 0);
 }
 

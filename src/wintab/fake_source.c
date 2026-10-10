@@ -81,7 +81,7 @@ DWORD WINAPI fake_source_thread(void *arg)
     volatile LONG *stopping = arg;
     struct ring_handle ring;
     const struct fake_tool *cur = NULL;
-    BOOL cur_eraser = FALSE;
+    BOOL cur_eraser = FALSE, down, last_down = FALSE;
     POINT last = { -1, -1 };
     otdwt_event ev;
 
@@ -120,11 +120,15 @@ DWORD WINAPI fake_source_thread(void *arg)
         }
 
         GetCursorPos(&p);
-        if (p.x != last.x || p.y != last.y || (GetAsyncKeyState(VK_LBUTTON) & 0x8000))
+        down = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+        /* also on button changes: a release must reach the application
+         * even if the mouse did not move */
+        if (p.x != last.x || p.y != last.y || down || down != last_down)
         {
             make_event(&ev, OTDWT_EV_PACKET, cur, cur_eraser);
             ring_publish(&ring, &ev);
             last = p;
+            last_down = down;
         }
         Sleep(5);
     }
