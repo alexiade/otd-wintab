@@ -2,10 +2,13 @@
  * otd-wintab: a fake tablet producer for testing the provider without
  * OpenTabletDriver. Enabled with OTD_WINTAB_FAKE=1. It follows the mouse:
  *
+ *   Scroll Lock     on: the pen is on the tablet (in proximity) and mouse
+ *                   movement is pen movement; off: the pen is lifted and
+ *                   the mouse is just the mouse
  *   left button     tip pressed, pressure pulses so dynamics are visible
  *   Caps Lock       on: "Airbrush" (with wheel), off: "Grip Pen" (with tilt)
+ *   Num Lock        off: "Art Pen" (with rotation), overrides Caps Lock
  *   Shift           eraser end of the current tool
- *   Scroll Lock     on: "Art Pen" (with rotation), overrides Caps Lock
  *
  * Each tool has a fixed fake serial, so switching tools exercises the
  * dynamic cursor creation exactly like real styli would.
@@ -91,18 +94,25 @@ DWORD WINAPI fake_source_thread(void *arg)
 
     while (!*stopping)
     {
-        const struct fake_tool *t = (GetKeyState(VK_SCROLL) & 1) ? &tools[2] :
+        BOOL on_tablet = (GetKeyState(VK_SCROLL) & 1) != 0;
+        const struct fake_tool *t = !(GetKeyState(VK_NUMLOCK) & 1) ? &tools[2] :
                                     (GetKeyState(VK_CAPITAL) & 1) ? &tools[1] : &tools[0];
         BOOL eraser = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
         POINT p;
 
-        if (t != cur || eraser != cur_eraser)
+        if (cur && (!on_tablet || t != cur || eraser != cur_eraser))
         {
-            if (cur)
-            {
-                make_event(&ev, OTDWT_EV_PROXIMITY_OUT, cur, cur_eraser);
-                ring_publish(&ring, &ev);
-            }
+            make_event(&ev, OTDWT_EV_PROXIMITY_OUT, cur, cur_eraser);
+            ring_publish(&ring, &ev);
+            cur = NULL;
+        }
+        if (!on_tablet)
+        {
+            Sleep(20);
+            continue;
+        }
+        if (!cur)
+        {
             cur = t;
             cur_eraser = eraser;
             make_event(&ev, OTDWT_EV_PROXIMITY_IN, cur, cur_eraser);

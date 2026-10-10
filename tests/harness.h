@@ -109,6 +109,10 @@ struct msg_log
     PACKET packets[MAX_LOG];
     char new_cursor_names[16][256]; /* names seen on WT_CSRCHANGE */
     int ncursor_names;
+    /* GTK 3's proximity bookkeeping, simulated message by message
+     * (gdkdevicemanager-win32.c): when ignore_core drops back to 0 GTK
+     * makes the system pointer active again. */
+    int gtk_entered_proximity, gtk_ignore_core;
 };
 /* Pumps messages for ms milliseconds, fetching packets like GTK does. */
 void pump(struct msg_log *log, int ms);

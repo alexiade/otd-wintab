@@ -339,6 +339,28 @@ static void proximity_messages(void)
     CHECK_EQ_U(log.proximity_out, 2);
 }
 
+/* after the pen leaves, GTK must hand control back to the mouse: its
+ * ignore_core count has to return to zero for new and known tools alike */
+static void proximity_returns_to_system_pointer(void)
+{
+    HWND hwnd = make_window();
+    struct msg_log log = {0};
+
+    open_context(hwnd, 0, 0, 0, 128);
+    settle();
+    stroke(&GRIP_PEN, 3);       /* new tool */
+    pump(&log, 200);
+    CHECK(log.gtk_ignore_core == 0, "after a new tool: ignore_core %d", log.gtk_ignore_core);
+    stroke(&GRIP_PEN, 3);       /* same tool again */
+    pump(&log, 200);
+    CHECK(log.gtk_ignore_core == 0, "after the same tool: ignore_core %d", log.gtk_ignore_core);
+    stroke(&AIRBRUSH, 3);       /* switching tools */
+    stroke(&GRIP_ERASER, 3);
+    pump(&log, 200);
+    CHECK(log.gtk_ignore_core == 0, "after switching tools: ignore_core %d", log.gtk_ignore_core);
+    CHECK_EQ_U(log.gtk_entered_proximity, 0);
+}
+
 /* attaching mid-stroke synthesises the missing proximity-in */
 static void proximity_synthesised_mid_stroke(void)
 {
@@ -665,6 +687,7 @@ const struct test_case test_cases[] =
     T(packets_eraser_inverted, TRUE),
     T(packets_serials_increase, TRUE),
     T(proximity_messages, TRUE),
+    T(proximity_returns_to_system_pointer, TRUE),
     T(proximity_synthesised_mid_stroke, TRUE),
     T(coords_gtk_identity, TRUE),
     T(coords_classic_y_up, TRUE),

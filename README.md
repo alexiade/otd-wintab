@@ -107,10 +107,12 @@ $env:OTD_WINTAB_FAKE = 1
 & "$env:LOCALAPPDATA\Programs\GIMP 3\bin\gimp-3.2.exe"
 ```
 
-The fake tablet follows the mouse. Hold the left button to draw with
-pulsing pressure; **Caps Lock** switches to an airbrush (wheel), **Scroll
-Lock** to an Art Pen (rotation), **Shift** selects the eraser end. Each
-becomes its own device in *Edit → Input Devices*.
+The fake tablet follows the mouse while **Scroll Lock** is on (the pen is
+"on the tablet"); turn it off to lift the pen and get the plain mouse back.
+Hold the left button to draw with pulsing pressure; **Caps Lock** switches
+to an airbrush (wheel), **Num Lock off** to an Art Pen (rotation), **Shift**
+selects the eraser end. Each becomes its own device in *Edit → Input
+Devices*.
 
 Remove with `.\scripts\install-gimp.ps1 -Uninstall`.
 

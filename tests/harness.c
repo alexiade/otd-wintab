@@ -159,6 +159,8 @@ void pump(struct msg_log *log, int ms)
             {
             case WT_CSRCHANGE:
                 log->csrchange++;
+                if (log->gtk_entered_proximity > 0) log->gtk_entered_proximity--;
+                log->gtk_ignore_core++;
                 /* GTK fetches the packet to learn the new cursor */
                 if (wt.Packet((HCTX)msg.lParam, (UINT)msg.wParam, &pkt) && log->ncursor_names < 16)
                 {
@@ -170,11 +172,24 @@ void pump(struct msg_log *log, int ms)
                 }
                 break;
             case WT_PROXIMITY:
-                if (LOWORD(msg.lParam)) log->proximity_in++;
-                else log->proximity_out++;
+                if (LOWORD(msg.lParam))
+                {
+                    log->proximity_in++;
+                    log->gtk_entered_proximity++;
+                }
+                else
+                {
+                    log->proximity_out++;
+                    if (log->gtk_ignore_core > 0) log->gtk_ignore_core--;
+                }
                 break;
             case WT_PACKET:
                 log->packet_msgs++;
+                if (log->gtk_entered_proximity > 0)
+                {
+                    log->gtk_entered_proximity--;
+                    log->gtk_ignore_core++;
+                }
                 if (wt.Packet((HCTX)msg.lParam, (UINT)msg.wParam, &pkt) && log->npackets < MAX_LOG)
                     log->packets[log->npackets++] = pkt;
                 break;

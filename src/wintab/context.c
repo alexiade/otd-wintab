@@ -253,6 +253,14 @@ void TABLET_DeliverPacket(const WTPACKET *in, UINT device, LPARAM proximity)
         ptr->PacketQueue[tgt] = *packet;
         ptr->PacketsQueued++;
 
+        /* otd-wintab: WT_PROXIMITY goes out before WT_CSRCHANGE, as Wacom's
+         * driver does. GTK pairs a cursor change with a preceding
+         * proximity-in; the other order leaves GTK ignoring the mouse
+         * after the pen has left. */
+        if (proximity)
+            TABLET_PostTabletMessage(ptr, _WT_PROXIMITY(ptr->context.lcMsgBase),
+                                     (WPARAM)ptr->handle, proximity, TRUE);
+
         if (ptr->ActiveCursor != packet->pkCursor)
         {
             ptr->ActiveCursor = packet->pkCursor;
@@ -262,10 +270,7 @@ void TABLET_DeliverPacket(const WTPACKET *in, UINT device, LPARAM proximity)
                     FALSE);
         }
 
-        if (proximity)
-            TABLET_PostTabletMessage(ptr, _WT_PROXIMITY(ptr->context.lcMsgBase),
-                                     (WPARAM)ptr->handle, proximity, TRUE);
-        else if (ptr->context.lcOptions & CXO_MESSAGES)
+        if (!proximity && (ptr->context.lcOptions & CXO_MESSAGES))
             TABLET_PostTabletMessage(ptr, _WT_PACKET(ptr->context.lcMsgBase),
                                      (WPARAM)packet->pkSerialNumber,
                                      (LPARAM)ptr->handle, FALSE);
