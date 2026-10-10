@@ -28,6 +28,7 @@
 #include "wintab_internal.h"
 #include "backend.h"
 #include "ring.h"
+#include "gtk_glue.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wintab32);
@@ -389,6 +390,7 @@ BOOL backend_init(void)
                        (LPCWSTR)backend_init, &self);
 
     setup_device();
+    gtk_glue_start();
     if (fake_source_enabled())
         CloseHandle(CreateThread(NULL, 0, fake_source_thread, (void *)&stopping, 0, NULL));
     reader_thread = CreateThread(NULL, 0, reader_thread_proc, NULL, 0, NULL);

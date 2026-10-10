@@ -1,0 +1,142 @@
+/*
+ * otd-wintab: announce GTK 3 Wintab devices on the seat. See gtk_glue.h.
+ *
+ * Copyright 2026 otd-wintab contributors
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ */
+
+#include "wine_compat.h"
+#include "gtk_glue.h"
+#include "iat.h"
+
+static BOOL in_list(const glue_list *l, const void *p)
+{
+    for (; l; l = l->next)
+        if (l->data == p) return TRUE;
+    return FALSE;
+}
+
+static BOOL was_announced(const struct gtk_glue *glue, const void *device)
+{
+    int i;
+    for (i = 0; i < glue->nannounced; i++)
+        if (glue->announced[i] == device) return TRUE;
+    return FALSE;
+}
+
+int gtk_glue_scan(struct gtk_glue *glue)
+{
+    const struct gtk_api *api = &glue->api;
+    void *display, *seat, *manager;
+    glue_list *floating, *slaves, *l;
+    int count = 0;
+
+    display = api->display_get_default();
+    if (!display) return 0;
+    seat = api->display_get_default_seat(display);
+    manager = api->display_get_device_manager(display);
+    if (!seat || !manager) return 0;
+
+    floating = api->device_manager_list_devices(manager, GLUE_DEVICE_TYPE_FLOATING);
+    if (!floating) return 0;
+    slaves = api->seat_get_slaves(seat, GLUE_SEAT_CAPABILITY_ALL);
+
+    for (l = floating; l; l = l->next)
+    {
+        /* already known to the seat (a fixed GTK) or already announced */
+        if (in_list(slaves, l->data) || was_announced(glue, l->data))
+            continue;
+        if (glue->nannounced >= GLUE_MAX_ANNOUNCED)
+            break;
+        glue->announced[glue->nannounced++] = l->data;
+        TRACE("announcing floating device %p on seat %p\n", l->data, seat);
+        api->signal_emit_by_name(seat, "device-added", l->data);
+        count++;
+    }
+
+    api->list_free(slaves);
+    api->list_free(floating);
+    return count;
+}
+
+glue_list *gtk_glue_extend_slaves(struct gtk_glue *glue, glue_list *slaves, int capabilities)
+{
+    const struct gtk_api *api = &glue->api;
+    void *display, *manager;
+    glue_list *floating, *l;
+
+    if (!(capabilities & GLUE_SEAT_CAPABILITY_PENS)) return slaves;
+    if (!(display = api->display_get_default())) return slaves;
+    if (!(manager = api->display_get_device_manager(display))) return slaves;
+
+    floating = api->device_manager_list_devices(manager, GLUE_DEVICE_TYPE_FLOATING);
+    for (l = floating; l; l = l->next)
+        if (!in_list(slaves, l->data))
+            slaves = api->list_append(slaves, l->data);
+    api->list_free(floating);
+    return slaves;
+}
+
+/* ---- runtime binding to the GTK in this process ----------------------- */
+
+static struct gtk_glue the_glue;
+
+static int scan_tick(void *unused)
+{
+    gtk_glue_scan(&the_glue);
+    return 1;   /* G_SOURCE_CONTINUE */
+}
+
+static glue_list *seat_get_slaves_hook(void *seat, int capabilities)
+{
+    glue_list *slaves = the_glue.api.seat_get_slaves(seat, capabilities);
+    return gtk_glue_extend_slaves(&the_glue, slaves, capabilities);
+}
+
+static BOOL bind(struct gtk_api *api)
+{
+    HMODULE gdk = GetModuleHandleA("libgdk-3-0.dll");
+    HMODULE glib = GetModuleHandleA("libglib-2.0-0.dll");
+    HMODULE gobject = GetModuleHandleA("libgobject-2.0-0.dll");
+
+    if (!gdk || !glib || !gobject) return FALSE;
+#define BIND(field, mod, name) if (!(*(FARPROC *)&api->field = GetProcAddress(mod, name))) return FALSE
+    BIND(display_get_default, gdk, "gdk_display_get_default");
+    BIND(display_get_default_seat, gdk, "gdk_display_get_default_seat");
+    BIND(display_get_device_manager, gdk, "gdk_display_get_device_manager");
+    BIND(device_manager_list_devices, gdk, "gdk_device_manager_list_devices");
+    BIND(seat_get_slaves, gdk, "gdk_seat_get_slaves");
+    BIND(list_free, glib, "g_list_free");
+    BIND(list_append, glib, "g_list_append");
+    BIND(timeout_add, glib, "g_timeout_add");
+    BIND(signal_emit_by_name, gobject, "g_signal_emit_by_name");
+#undef BIND
+    return TRUE;
+}
+
+void gtk_glue_start(void)
+{
+    static LONG started;
+    int wrapped;
+    char v[8];
+    DWORD n = GetEnvironmentVariableA("OTD_WINTAB_NO_GTK_GLUE", v, sizeof(v));
+
+    if (n > 0 && n < sizeof(v) && v[0] != '0') return;
+    if (InterlockedExchange(&started, 1)) return;
+    if (!bind(&the_glue.api))
+    {
+        TRACE("not a GTK 3 process, glue inactive\n");
+        return;
+    }
+    /* only the application's own view of the seat; GTK's internal calls
+     * don't go through the executable's import table */
+    wrapped = iat_patch_module(GetModuleHandleW(NULL), "libgdk-3-0.dll",
+                               "gdk_seat_get_slaves", (void *)seat_get_slaves_hook);
+    TRACE("GTK glue active, %d gdk_seat_get_slaves import(s) wrapped\n", wrapped);
+    /* g_timeout_add is thread-safe; the callback runs on the main loop */
+    the_glue.api.timeout_add(250, scan_tick, NULL);
+}

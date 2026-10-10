@@ -62,6 +62,8 @@ $wintabSources = @(
     "$root\third_party\wine\dlls\wintab32\manager.c",
     "$root\src\wintab\backend_otd.c",
     "$root\src\wintab\fake_source.c",
+    "$root\src\wintab\gtk_glue.c",
+    "$root\src\wintab\iat.c",
     "$root\src\wintab\ring.c",
     "$root\src\wintab\log.c"
 )
@@ -72,8 +74,9 @@ Invoke-Zig (@('cc') + $common + $wintabIncludes + @('-shared', '-o', "$out\otd-w
 # Test harness (talks to the DLL only through its exports and the ring)
 Write-Host 'Building selftest.exe'
 Invoke-Zig (@('cc') + $common + $wintabIncludes + @('-o', "$out\selftest.exe",
-    "$root\tests\harness.c", "$root\tests\test_cases.c",
-    "$root\src\wintab\ring.c", "$root\src\wintab\log.c", '-luser32'))
+    "$root\tests\harness.c", "$root\tests\test_cases.c", "$root\tests\test_gtk_glue.c",
+    "$root\src\wintab\ring.c", "$root\src\wintab\gtk_glue.c", "$root\src\wintab\iat.c",
+    "$root\src\wintab\log.c", '-luser32'))
 
 # Injection proxy: dwmapi.dll forwarding to the system copy
 Write-Host 'Building dwmapi.dll (injection proxy)'

@@ -43,6 +43,13 @@ tablet ─► OpenTabletDriver ─► otd-wintab plugin ──(shared memory rin
   `otd-wintab32.dll`. The system Wintab (e.g. Wacom's driver) stays in
   place for every other application.
 
+* **GTK 3 seat glue.** GTK 3 creates Wintab devices but never adds them
+  to the `GdkSeat`, so GIMP 3, which lists devices through the seat, shows
+  none of them (with any Wintab driver). Inside GTK 3 processes the
+  provider wraps the application's `gdk_seat_get_slaves()` import and
+  emits the seat's `device-added` for each Wintab device; see
+  [`src/wintab/gtk_glue.h`](src/wintab/gtk_glue.h).
+
 Axes as GIMP sees them:
 
 | Tablet data | Wintab | GTK / GIMP |
@@ -114,6 +121,7 @@ Remove with `.\scripts\install-gimp.ps1 -Uninstall`.
 | `OTD_WINTAB_LOG=<file>` | provider trace log |
 | `OTD_WINTAB_FAKE=1` | built-in fake tablet that follows the mouse |
 | `OTD_WINTAB_DISABLE=1` | proxy leaves Wintab loading alone |
+| `OTD_WINTAB_NO_GTK_GLUE=1` | don't register Wintab devices with the GTK seat (see below) |
 | `OTD_WINTAB_INSTANCE=<name>` | use a private ring (tests) |
 
 ## License
