@@ -99,14 +99,35 @@ public class ParserTests
     }
 
     [Fact]
-    public void Exit_becomes_out_of_range()
+    public void Exit_is_a_final_released_report_at_the_last_position()
     {
         _parser.Parse(P.Enter(0x823, 1));
-        Assert.IsType<OutOfRangeReport>(_parser.Parse(P.Exit()));
+        _parser.Parse(P.Pen(4000, 5000, 1500, tiltX: 12, lower: true));    // tip and barrel down
+        var r = Assert.IsType<IntuosLeavingReport>(_parser.Parse(P.Exit()));
+
+        // what OpenTabletDriver's BindingHandler needs to release the tip,
+        // eraser and barrel bindings
+        Assert.IsAssignableFrom<IToolLeavingReport>(r);
+        Assert.Equal(0u, r.Pressure);
+        Assert.Equal(new[] { false, false }, r.PenButtons);
+        Assert.Equal(new System.Numerics.Vector2(4000, 5000), r.Position);
+        Assert.Equal(12f, r.Tilt.X);
+        Assert.False(r.NearProximity);
+
         // without a known tool, packets are ignored (as in Linux) ...
         Assert.IsType<DeviceReport>(_parser.Parse(P.Pen(1, 1, 1)));
         // ... and a second exit is not reported again
         Assert.IsType<DeviceReport>(_parser.Parse(P.Exit()));
+    }
+
+    [Fact]
+    public void Eraser_exit_releases_the_eraser()
+    {
+        _parser.Parse(P.Enter(0x82B, 1));
+        _parser.Parse(P.Pen(10, 10, 900));
+        var r = Assert.IsType<IntuosLeavingReport>(_parser.Parse(P.Exit()));
+        Assert.True(r.Eraser);      // BindingHandler routes it to the eraser binding
+        Assert.Equal(0u, r.Pressure);
     }
 
     [Fact]

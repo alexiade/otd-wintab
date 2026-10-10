@@ -5,7 +5,9 @@
 //
 //  - accepts every proximity packet ((b1 & 0xFC) == 0xC0), so the tool id,
 //    serial and eraser end are always known,
-//  - reports the tool leaving ((b1 & 0xFE) == 0x80) as OutOfRangeReport,
+//  - reports the tool leaving ((b1 & 0xFE) == 0x80) as a final report with
+//    no pressure and no buttons (see IToolLeavingReport), so nothing stays
+//    pressed when the pen leaves with its tip down,
 //  - decodes the airbrush finger wheel (packet type 0x0A), which the
 //    built-in parser mistakes for a mouse report, and
 //  - decodes Art Pen / marker barrel rotation (packet type 0x05).
@@ -25,16 +27,30 @@ namespace OtdWintab.Parsers;
 [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)]
 public class WacomIntuos3ReportParser : IReportParser<IDeviceReport>
 {
+    /// <summary>OTD_WINTAB_RAWLOG=1 logs every packet except plain pen
+    /// packets to OpenTabletDriver's log, for protocol diagnosis.</summary>
+    private static readonly bool RawLog = Environment.GetEnvironmentVariable("OTD_WINTAB_RAWLOG") == "1";
+
     private uint _toolId;       // 0 = unknown, packets are dropped as in Linux
     private ulong _serial;
     private uint _pressure;
     private Vector2 _tilt;
+    private Vector2 _position;
     private bool[] _penButtons = new bool[2];
     private float _wheel;
     private float _rotation;
     private bool _hasWheel, _hasRotation;
 
     public virtual IDeviceReport Parse(byte[] data)
+    {
+        var report = ParseReport(data);
+        if (RawLog && !(report is IntuosPenReport && ((data[1] >> 1) & 0x0F) <= 3))
+            OpenTabletDriver.Plugin.Log.Write("otd-wintab raw",
+                $"{Convert.ToHexString(data)} -> {report.GetType().Name} (tool {_toolId:X})");
+        return report;
+    }
+
+    private IDeviceReport ParseReport(byte[] data)
     {
         if (data.Length < 10)
             return new DeviceReport(data);
@@ -72,9 +88,24 @@ public class WacomIntuos3ReportParser : IReportParser<IDeviceReport>
             return new DeviceReport(d);
         if ((b1 & 0xFE) == 0x80)            /* exit */
         {
-            bool known = _toolId != 0;
+            if (_toolId == 0)
+                return new DeviceReport(d); /* Linux: no exit for an unknown tool */
+
+            /* wacom_exit_report: everything released, at the last position */
+            var leaving = new IntuosLeavingReport
+            {
+                Raw = d,
+                Position = _position,
+                Pressure = 0,
+                PenButtons = new bool[2],
+                Tilt = _tilt,
+                Eraser = (_toolId & 0x0008) != 0,
+                NearProximity = false,
+            };
             _toolId = 0;
-            return known ? new OutOfRangeReport(d) : new DeviceReport(d);
+            _pressure = 0;
+            _penButtons = new bool[2];
+            return leaving;
         }
 
         if (_toolId == 0 || IsPuck(_toolId))
@@ -113,6 +144,7 @@ public class WacomIntuos3ReportParser : IReportParser<IDeviceReport>
             return new DeviceReport(d);
         }
 
+        _position = position;
         var report = _hasWheel ? new IntuosAirbrushReport { Wheel = _wheel }
                    : _hasRotation ? new IntuosArtPenReport { Rotation = _rotation }
                    : new IntuosPenReport();
@@ -170,6 +202,11 @@ public class IntuosPenReport : ITabletReport, ITiltReport, IEraserReport, IProxi
     public bool Eraser { set; get; }
     public bool NearProximity { set; get; }
     public uint HoverDistance { set; get; }
+}
+
+/// <summary>The exit packet, as the tool's final, fully released report.</summary>
+public class IntuosLeavingReport : IntuosPenReport, IToolLeavingReport
+{
 }
 
 public class IntuosAirbrushReport : IntuosPenReport, IAirbrushWheelReport

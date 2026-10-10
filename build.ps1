@@ -98,6 +98,10 @@ Invoke-Zig (@('cc') + $common + @('-o', "$injectDir\inject_host.exe",
     "$root\tests\inject\host.c", "$obj\libgdk-3-0.dll.a", '-ldwmapi'))
 Copy-Item "$out\dwmapi.dll", "$out\otd-wintab32.dll" $injectDir
 
+# Diagnostic: prints live ring events
+Invoke-Zig (@('cc') + $common + $wintabIncludes + @('-o', "$out\ringwatch.exe", "$root\tools\ringwatch.c",
+    "$root\src\wintab\ring.c", "$root\src\wintab\log.c"))
+
 # Layout probe, so the C# side can be checked against the C header
 Invoke-Zig (@('cc') + $common + @('-I', "$root\include", '-o', "$out\ringlayout.exe", "$root\tests\ringlayout.c"))
 

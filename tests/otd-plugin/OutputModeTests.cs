@@ -86,7 +86,7 @@ public class OutputModeTests : IDisposable
 
         var ev = Published();
         Assert.Equal(new[] { EventType.ProximityIn, EventType.Packet, EventType.Packet, EventType.Packet,
-                             EventType.ProximityOut }, ev.Select(e => e.Type));
+                             EventType.Packet, EventType.ProximityOut }, ev.Select(e => e.Type));
         Assert.All(ev, e => Assert.Equal("Airbrush Pen", e.GetName()));
         Assert.All(ev, e => Assert.Equal(0x0FA4E002u, e.Serial));
 
@@ -101,6 +101,26 @@ public class OutputModeTests : IDisposable
         Assert.InRange(ev[2].Pressure, 16300u, 16450u);
         Assert.Equal(100, ev[2].TiltX);
         Assert.Equal(RingProtocol.WheelMax, ev[3].Wheel);
+        Assert.Equal(0u, ev[4].Buttons);                        // released before leaving
+    }
+
+    [Fact]
+    public void Leaving_with_the_tip_down_releases_everything_first()
+    {
+        Feed(P.Enter(0x823, 7));
+        Feed(P.Pen(20320, 15240, 1500, lower: true));   // tip and barrel down ...
+        Feed(P.Exit());                                  // ... as the pen leaves
+
+        var ev = Published();
+        Assert.Equal(new[] { EventType.ProximityIn, EventType.Packet, EventType.Packet, EventType.ProximityOut },
+                     ev.Select(e => e.Type));
+        Assert.Equal(3u, ev[1].Buttons);
+        Assert.Equal(0u, ev[2].Buttons);
+        Assert.Equal(0u, ev[2].Pressure);
+        Assert.Equal(ev[1].X, ev[2].X);                  // where the pen was
+        Assert.Equal(ev[1].Y, ev[2].Y);
+        Assert.Equal(2, _pointer.Moves);                 // the cursor isn't thrown to 0,0
+        Assert.True(Vector2.Distance(new Vector2(1016, 762), _pointer.Last) < 0.01f);
     }
 
     [Fact]

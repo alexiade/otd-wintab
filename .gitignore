@@ -1,5 +1,6 @@
 # Local toolchain (fetched by build.ps1)
 /tools/zig/
+/tools/zig-extract/
 
 # Build output
 /build/

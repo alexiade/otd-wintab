@@ -86,6 +86,10 @@ public class WintabAbsoluteMode : AbsoluteOutputMode
                 Rotation = report is IBarrelRotationReport rotation ? rotation.Rotation : null,
             };
             tracker.OnSample(sample, now);
+
+            // the parser's stand-in for OutOfRangeReport (see IToolLeavingReport)
+            if (report is IToolLeavingReport)
+                tracker.OnOutOfRange(now);
         }
     }
 

@@ -15,6 +15,18 @@ public interface IAirbrushWheelReport : IDeviceReport
     float Wheel { get; }
 }
 
+/// <summary>
+/// The tool's last report as it leaves proximity: pressure 0, every button
+/// up, at its last position (as Linux's wacom_exit_report). It stands in for
+/// OutOfRangeReport, because OpenTabletDriver 0.6's BindingHandler only
+/// releases barrel-button bindings on OutOfRangeReport; the tip and eraser
+/// bindings are released only by a report with no pressure. Without it, a pen
+/// leaving with its tip down keeps the tip's mouse button pressed.
+/// </summary>
+public interface IToolLeavingReport : ITabletReport
+{
+}
+
 /// <summary>Barrel rotation (Art Pen / marker).</summary>
 public interface IBarrelRotationReport : IDeviceReport
 {
