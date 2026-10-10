@@ -1,0 +1,11 @@
+# Local toolchain (fetched by build.ps1)
+/tools/zig/
+
+# Build output
+/build/
+
+# Editor / OS clutter
+.vs/
+.vscode/
+*.swp
+Thumbs.db
