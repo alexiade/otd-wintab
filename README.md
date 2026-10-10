@@ -127,6 +127,9 @@ Wintab backend with `GDK_WIN32_TABLET_INPUT_API=wintab`. Pass
 `-GtkOverride <dir>` to run against a GTK 4 build instead. There are no GTK
 workarounds for GTK 4: released GTK 4 versions need the fixes in GTK itself.
 
+[docs/gtk-testing.md](docs/gtk-testing.md) explains how to use both probes
+to test GTK itself, including your own GTK builds (`scripts\build-gtk.ps1`).
+
 ## Installing the OpenTabletDriver plugin
 
 Requires OpenTabletDriver 0.6.x.
