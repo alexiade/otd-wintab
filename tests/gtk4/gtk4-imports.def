@@ -1,0 +1,34 @@
+; Functions tests/gtk4/gtk4probe.c imports from the GTK 4 runtime, one
+; section per DLL (split by scripts/test-gtk4.ps1 into import libraries).
+[libgtk-4-1.dll]
+gtk_init
+gtk_window_new
+gtk_window_set_title
+gtk_window_set_default_size
+gtk_window_set_child
+gtk_window_present
+gtk_drawing_area_new
+gtk_widget_add_controller
+gtk_widget_get_native
+gtk_native_get_surface
+gtk_event_controller_legacy_new
+gtk_gesture_stylus_new
+gtk_gesture_stylus_get_axis
+gtk_gesture_stylus_get_device_tool
+gdk_win32_surface_get_handle
+gdk_display_get_default
+gdk_display_get_default_seat
+gdk_seat_get_devices
+gdk_seat_get_tools
+gdk_device_get_name
+gdk_event_get_event_type
+gdk_event_get_device_tool
+gdk_event_get_axis
+gdk_device_tool_get_serial
+gdk_device_tool_get_hardware_id
+gdk_device_tool_get_tool_type
+[libglib-2.0-0.dll]
+g_main_context_iteration
+g_list_free
+[libgobject-2.0-0.dll]
+g_signal_connect_data

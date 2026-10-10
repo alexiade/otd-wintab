@@ -98,6 +98,15 @@ Invoke-Zig (@('cc') + $common + @('-o', "$injectDir\inject_host.exe",
     "$root\tests\inject\host.c", "$obj\libgdk-3-0.dll.a", '-ldwmapi'))
 Copy-Item "$out\dwmapi.dll", "$out\otd-wintab32.dll" $injectDir
 
+# The same for GTK 4, where GDK is part of libgtk-4-1.dll
+$inject4Dir = Join-Path $out 'inject-test-gtk4'
+New-Item -ItemType Directory -Force $inject4Dir | Out-Null
+Invoke-Zig (@('cc') + $common + @('-shared', '-o', "$inject4Dir\libgtk-4-1.dll",
+    "-Wl,--out-implib,$obj\libgtk-4-1.dll.a", "$root\tests\inject\mock_gdk.c", '-ldwmapi'))
+Invoke-Zig (@('cc') + $common + @('-o', "$inject4Dir\inject_host.exe",
+    "$root\tests\inject\host.c", "$obj\libgtk-4-1.dll.a", '-ldwmapi'))
+Copy-Item "$out\dwmapi.dll", "$out\otd-wintab32.dll" $inject4Dir
+
 # Diagnostic: prints live ring events
 Invoke-Zig (@('cc') + $common + $wintabIncludes + @('-o', "$out\ringwatch.exe", "$root\tools\ringwatch.c",
     "$root\src\wintab\ring.c", "$root\src\wintab\log.c"))
@@ -105,7 +114,8 @@ Invoke-Zig (@('cc') + $common + $wintabIncludes + @('-o', "$out\ringwatch.exe", 
 # Layout probe, so the C# side can be checked against the C header
 Invoke-Zig (@('cc') + $common + @('-I', "$root\include", '-o', "$out\ringlayout.exe", "$root\tests\ringlayout.c"))
 
-Remove-Item "$out\*.pdb", "$out\*.lib", "$injectDir\*.pdb", "$injectDir\*.lib" -ErrorAction SilentlyContinue
+Remove-Item "$out\*.pdb", "$out\*.lib", "$injectDir\*.pdb", "$injectDir\*.lib",
+    "$inject4Dir\*.pdb", "$inject4Dir\*.lib" -ErrorAction SilentlyContinue
 
 # OpenTabletDriver plugin
 Write-Host 'Building OpenTabletDriver plugin'
@@ -124,6 +134,8 @@ if ($Test) {
     $env:OTD_WINTAB_DISABLE = '1'
     try { & "$injectDir\inject_host.exe" disabled } finally { Remove-Item Env:OTD_WINTAB_DISABLE }
     if ($LASTEXITCODE -ne 0) { throw 'injection test (disabled) failed' }
+    & "$inject4Dir\inject_host.exe"
+    if ($LASTEXITCODE -ne 0) { throw 'injection test (GTK 4) failed' }
 
     Write-Host 'Running plugin tests'
     & dotnet test "$root\tests\otd-plugin\OtdWintab.Tests.csproj" -c $dotnetConfig --nologo -v quiet

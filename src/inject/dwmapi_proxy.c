@@ -26,7 +26,7 @@
 #include <wchar.h>
 
 /* Modules whose Wintab loading we redirect */
-static const char *const target_modules[] = { "libgdk-3-0.dll" };
+static const char *const target_modules[] = { "libgdk-3-0.dll", "libgtk-4-1.dll" };
 
 static WCHAR provider_path[MAX_PATH];
 

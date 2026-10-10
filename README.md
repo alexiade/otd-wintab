@@ -120,6 +120,13 @@ eraser. It takes over the mouse pointer for about ten seconds. Set
 `OTD_GTKPROBE_VERBOSE=1` to print every pointer event with its source
 device, and pass `-Log` for the provider's trace.
 
+`.\scripts\test-gtk4.ps1` does the same for GTK 4 (MSYS2's by default), the
+way GTK 4 drawing applications use a tablet: a `GtkGestureStylus` on the
+canvas and the pen identified by its `GdkDeviceTool`. It selects GTK 4's
+Wintab backend with `GDK_WIN32_TABLET_INPUT_API=wintab`. Pass
+`-GtkOverride <dir>` to run against a GTK 4 build instead. There are no GTK
+workarounds for GTK 4: released GTK 4 versions need the fixes in GTK itself.
+
 ## Installing the OpenTabletDriver plugin
 
 Requires OpenTabletDriver 0.6.x.
