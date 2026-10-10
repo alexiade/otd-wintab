@@ -11,9 +11,16 @@
 .EXAMPLE
     .\build.ps1; .\scripts\test-gtk.ps1
     .\scripts\test-gtk.ps1 -GtkBin 'D:\Apps\GIMP 3\bin' -Log
+
+    # GTK itself, without otd-wintab's GTK workarounds: a patched GTK
+    # build in front of an MSYS2 CLANG64 runtime
+    .\scripts\test-gtk.ps1 -NoGlue -GtkBin C:\msys64\clang64\bin `
+        -GtkOverride S:\repos\gtk-build\gdk, S:\repos\gtk-build\gtk
 #>
 param(
     [string]$GtkBin,
+    [string[]]$GtkOverride = @(),   # directories searched before GtkBin (a GTK build)
+    [switch]$NoGlue,                # OTD_WINTAB_NO_GTK_GLUE=1: test GTK as it is
     [switch]$Log
 )
 
@@ -71,9 +78,14 @@ Remove-Item "$out\*.pdb" -ErrorAction SilentlyContinue
 Copy-Item (Join-Path $build 'dwmapi.dll'), (Join-Path $build 'otd-wintab32.dll') $out -Force
 
 Write-Host 'Running GTK integration test (hands off the mouse for ~10 s)'
-$env:PATH = "$GtkBin;$env:PATH"
+$env:PATH = (@($GtkOverride) + $GtkBin + $env:PATH) -join ';'
 $env:OTD_WINTAB_INSTANCE = "gtkprobe-$PID"
 Remove-Item Env:OTD_WINTAB_FAKE -ErrorAction SilentlyContinue
+if ($NoGlue) { $env:OTD_WINTAB_NO_GTK_GLUE = '1' } else { Remove-Item Env:OTD_WINTAB_NO_GTK_GLUE -ErrorAction SilentlyContinue }
+foreach ($d in @($GtkOverride) + $GtkBin) {
+    $gdk = Join-Path $d 'libgdk-3-0.dll'
+    if (Test-Path $gdk) { Write-Host "GDK: $gdk ($((Get-Item $gdk).LastWriteTime))"; break }
+}
 if ($Log) { $env:OTD_WINTAB_LOG = Join-Path $out 'gtkprobe-wintab.log' }
 & "$out\gtkprobe.exe"
 exit $LASTEXITCODE
