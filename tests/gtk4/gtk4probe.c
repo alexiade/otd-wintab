@@ -185,7 +185,7 @@ static void stylus_axes(void *gesture)
     if (gtk_gesture_stylus_get_axis(gesture, GDK_AXIS_PRESSURE, &v))
     {
         if (v > st.max_pressure) st.max_pressure = v;
-        if (st.second_stroke)
+        if (st.second_stroke && stylus_down)
         {
             if (v > 0.1) st.second_with_pressure++;
             else st.second_without_pressure++;
@@ -462,6 +462,8 @@ int main(void)
     stylus = gtk_gesture_stylus_new();
     g_signal_connect_data(stylus, "down", (void *)on_stylus_down, NULL, NULL, 0);
     g_signal_connect_data(stylus, "motion", (void *)on_stylus_motion, NULL, NULL, 0);
+    /* hovering: GtkGestureStylus reports motion without contact as "proximity" */
+    g_signal_connect_data(stylus, "proximity", (void *)on_stylus_motion, NULL, NULL, 0);
     g_signal_connect_data(stylus, "up", (void *)on_stylus_up, NULL, NULL, 0);
     gtk_widget_add_controller(canvas, stylus);
     gtk_window_present(window);
