@@ -16,10 +16,9 @@ the first time it sees a stylus, named after the tool and its serial, e.g.
 Because the device name depends only on the stylus, an application's
 per-device settings follow the pen from one tablet to another.
 
-> **Status:** early. The Wintab provider, the GIMP injection and a
-> hardware-free test suite work. The OpenTabletDriver output plugin that
-> feeds real tablets is next; until then the provider can be tried with a
-> built-in fake tablet that follows the mouse.
+> **Status:** early. The Wintab provider, the GIMP injection, the
+> OpenTabletDriver plugin (with a Linux-derived Intuos3 parser) and a
+> hardware-free test suite work; testing with real tablets has just begun.
 
 ## How it works
 
@@ -33,9 +32,18 @@ tablet ─► OpenTabletDriver ─► otd-wintab plugin ──(shared memory rin
   queue and message handling are kept; the X11 backend is replaced by one
   that reads tool events from a shared-memory ring and creates cursors on
   the fly. GTK picks new cursors up via `WT_CSRCHANGE`.
-* **The OpenTabletDriver plugin** (to come) publishes proximity and packet
-  events, including tool id and serial, into the ring. The format is in
-  [`include/otdwt_ring.h`](include/otdwt_ring.h).
+* **The OpenTabletDriver plugin** ([`src/otd-plugin`](src/otd-plugin))
+  adds a *Wintab Absolute Mode* output mode. It moves the system cursor
+  exactly like OpenTabletDriver's Absolute Mode (so the pen still works as
+  a mouse everywhere) and publishes proximity and packets, with tool id and
+  serial, into the ring ([`include/otdwt_ring.h`](include/otdwt_ring.h)).
+  Stylus names and capabilities come from libwacom's database. A proximity
+  watchdog covers tablets whose parser never reports the pen leaving.
+* **Intuos3 parser.** OpenTabletDriver's built-in Intuos3 parser misses
+  some proximity packets, never reports the pen leaving, mistakes the
+  airbrush wheel for a mouse and drops Art Pen rotation. The plugin ships a
+  port of the Linux kernel's Intuos protocol handling, enabled through
+  [configuration overrides](configurations/) for the PTZ models.
 * **Per-application install.** GTK loads Wintab from the system directory
   by absolute path, so the provider is injected instead: a `dwmapi.dll`
   proxy placed next to the application forwards all of `dwmapi` to the
@@ -86,6 +94,11 @@ The tests need no tablet, no OpenTabletDriver and no GIMP:
   and eraser encoding, proximity, coordinate mapping for GTK-style and
   classic contexts, multiple contexts, enable/disable, queue overflow and
   draining, and ring attach/overrun/restart behaviour.
+* **Plugin tests** (`dotnet test tests/otd-plugin`) feed Linux-format
+  Intuos3 packets through the parser and OpenTabletDriver's real
+  `AbsoluteOutputMode` pipeline into the ring, and cover tool tracking,
+  naming, the watchdog, the libwacom database, the configuration overrides,
+  and the ring layout checked field by field against the C header.
 * **`inject_host.exe`** reproduces GIMP's module layout with a mock
   `libgdk-3-0.dll` and checks the `dwmapi` proxy: export forwarding (named
   and ordinal-only), Wintab redirection, pass-through of other loads, and
@@ -106,6 +119,17 @@ lifting, airbrush, back to a known pen, a pen leaving with its tip down,
 eraser. It takes over the mouse pointer for about ten seconds. Set
 `OTD_GTKPROBE_VERBOSE=1` to print every pointer event with its source
 device, and pass `-Log` for the provider's trace.
+
+## Installing the OpenTabletDriver plugin
+
+Requires OpenTabletDriver 0.6.x.
+
+```powershell
+.\scripts\install-otd.ps1         # plugin + Intuos3 configuration overrides
+```
+
+Restart the OpenTabletDriver daemon and choose **Wintab Absolute Mode** as
+the tablet's output mode. `-Uninstall` removes both again.
 
 ## Trying it in GIMP
 
@@ -144,4 +168,8 @@ Remove with `.\scripts\install-gimp.ps1 -Uninstall`.
 ## License
 
 GNU LGPL 2.1 or later, like the Wine code it is built on. See
-[COPYING](COPYING).
+[COPYING](COPYING). The stylus database in `third_party/libwacom` is
+libwacom's (MIT-style license, see its `COPYING`); the files in
+`configurations/` derive from OpenTabletDriver (LGPL 3.0).
+
+The OpenTabletDriver plugin needs the .NET 8 SDK or later to build.

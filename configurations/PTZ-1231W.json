@@ -1,0 +1,46 @@
+{
+  "Name": "Wacom PTZ-1231W",
+  "Specifications": {
+    "Digitizer": {
+      "Width": 487.68,
+      "Height": 304.8,
+      "MaxX": 97536,
+      "MaxY": 60960
+    },
+    "Pen": {
+      "MaxPressure": 2046,
+      "ButtonCount": 2
+    },
+    "AuxiliaryButtons": {
+      "ButtonCount": 8
+    },
+    "MouseButtons": {
+      "ButtonCount": 5
+    }
+  },
+  "DigitizerIdentifiers": [
+    {
+      "VendorID": 1386,
+      "ProductID": 180,
+      "InputReportLength": 10,
+      "ReportParser": "OtdWintab.Parsers.WacomIntuos3ReportParser",
+      "FeatureInitReport": [
+        "AgI=",
+        "BAA="
+      ]
+    },
+    {
+      "VendorID": 1386,
+      "ProductID": 180,
+      "InputReportLength": 11,
+      "ReportParser": "OtdWintab.Parsers.WacomDriverIntuos3ReportParser",
+      "FeatureInitReport": [
+        "AgI=",
+        "BAA="
+      ]
+    }
+  ],
+  "Attributes": {
+    "FeatureInitDelayMs": "150"
+  }
+}

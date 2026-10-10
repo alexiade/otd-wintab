@@ -3,6 +3,9 @@
 
 # Build output
 /build/
+bin/
+obj/
+TestResults/
 
 # Editor / OS clutter
 .vs/

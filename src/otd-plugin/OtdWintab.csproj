@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- OpenTabletDriver 0.6.x runs on .NET 8 -->
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>OtdWintab</AssemblyName>
+    <RootNamespace>OtdWintab</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>latest</LangVersion>
+    <Version>0.1.0</Version>
+    <Authors>otd-wintab contributors</Authors>
+    <Description>Publishes OpenTabletDriver tool events to the otd-wintab Wintab provider.</Description>
+    <PackageLicenseExpression>LGPL-2.1-or-later</PackageLicenseExpression>
+    <!-- the plugin folder must not carry OpenTabletDriver's own assemblies -->
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="OpenTabletDriver.Plugin" Version="0.6.7" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\third_party\libwacom\wacom.stylus" LogicalName="wacom.stylus" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="OtdWintab.Tests" />
+  </ItemGroup>
+
+</Project>

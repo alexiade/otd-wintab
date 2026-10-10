@@ -98,7 +98,16 @@ Invoke-Zig (@('cc') + $common + @('-o', "$injectDir\inject_host.exe",
     "$root\tests\inject\host.c", "$obj\libgdk-3-0.dll.a", '-ldwmapi'))
 Copy-Item "$out\dwmapi.dll", "$out\otd-wintab32.dll" $injectDir
 
+# Layout probe, so the C# side can be checked against the C header
+Invoke-Zig (@('cc') + $common + @('-I', "$root\include", '-o', "$out\ringlayout.exe", "$root\tests\ringlayout.c"))
+
 Remove-Item "$out\*.pdb", "$out\*.lib", "$injectDir\*.pdb", "$injectDir\*.lib" -ErrorAction SilentlyContinue
+
+# OpenTabletDriver plugin
+Write-Host 'Building OpenTabletDriver plugin'
+$dotnetConfig = if ($Config -eq 'Debug') { 'Debug' } else { 'Release' }
+& dotnet build "$root\src\otd-plugin\OtdWintab.csproj" -c $dotnetConfig -o "$out\otd-plugin" --nologo -v quiet
+if ($LASTEXITCODE -ne 0) { throw 'plugin build failed' }
 
 if ($Test) {
     Write-Host 'Running provider tests'
@@ -111,4 +120,8 @@ if ($Test) {
     $env:OTD_WINTAB_DISABLE = '1'
     try { & "$injectDir\inject_host.exe" disabled } finally { Remove-Item Env:OTD_WINTAB_DISABLE }
     if ($LASTEXITCODE -ne 0) { throw 'injection test (disabled) failed' }
+
+    Write-Host 'Running plugin tests'
+    & dotnet test "$root\tests\otd-plugin\OtdWintab.Tests.csproj" -c $dotnetConfig --nologo -v quiet
+    if ($LASTEXITCODE -ne 0) { throw 'plugin tests failed' }
 }
