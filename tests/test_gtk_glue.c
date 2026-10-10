@@ -170,6 +170,36 @@ void glue_extends_seat_slaves(void)
     CHECK_EQ_U(lists_alive, 0);
 }
 
+/* GTK points the system pointer's association at the newest Wintab
+ * device; the application must see the seat's pointer instead */
+static int pointer_obj, mouse_obj, pen_obj;
+static void *fake_seat_get_pointer(void *s) { return s == &seat_obj ? &pointer_obj : NULL; }
+static int fake_device_type(void *d)
+{
+    if (d == &pointer_obj) return 0;                    /* master */
+    if (d == &mouse_obj) return GLUE_DEVICE_TYPE_SLAVE;
+    return GLUE_DEVICE_TYPE_FLOATING;                   /* pens */
+}
+
+void glue_fixes_associated_device(void)
+{
+    struct gtk_glue g;
+
+    fake_glue(&g);
+    g.api.seat_get_pointer = fake_seat_get_pointer;
+    g.api.device_get_device_type = fake_device_type;
+
+    /* the bug: mouse -> pen. Fixed: mouse -> core pointer */
+    CHECK(gtk_glue_fix_associated(&g, &mouse_obj, &pen_obj) == &pointer_obj, "mouse resolves to the pointer");
+    /* correct associations pass through */
+    CHECK(gtk_glue_fix_associated(&g, &mouse_obj, &pointer_obj) == &pointer_obj, "slave -> master kept");
+    CHECK(gtk_glue_fix_associated(&g, &pointer_obj, &mouse_obj) == &mouse_obj, "master -> slave kept");
+    CHECK(gtk_glue_fix_associated(&g, &pen_obj, NULL) == NULL, "no association kept");
+    no_display = TRUE;
+    CHECK(gtk_glue_fix_associated(&g, &mouse_obj, &pen_obj) == &pen_obj, "without a display, unchanged");
+    no_display = FALSE;
+}
+
 /* import patching redirects calls made through the import table */
 static DWORD WINAPI fake_GetCurrentProcessId(void) { return 0xC0FFEE; }
 

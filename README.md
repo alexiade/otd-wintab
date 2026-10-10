@@ -43,12 +43,14 @@ tablet ─► OpenTabletDriver ─► otd-wintab plugin ──(shared memory rin
   `otd-wintab32.dll`. The system Wintab (e.g. Wacom's driver) stays in
   place for every other application.
 
-* **GTK 3 seat glue.** GTK 3 creates Wintab devices but never adds them
-  to the `GdkSeat`, so GIMP 3, which lists devices through the seat, shows
-  none of them (with any Wintab driver). Inside GTK 3 processes the
-  provider wraps the application's `gdk_seat_get_slaves()` import and
-  emits the seat's `device-added` for each Wintab device; see
-  [`src/wintab/gtk_glue.h`](src/wintab/gtk_glue.h).
+* **GTK 3 glue.** Two GTK 3 Wintab bugs break GIMP 3 with any Wintab
+  driver: Wintab devices are never added to the `GdkSeat`, so GIMP lists
+  none of them; and each new Wintab device becomes the system pointer's
+  associated device, so after a pen is lifted GIMP attributes the mouse to
+  the last pen instead of switching back to the core pointer. Inside GTK 3
+  processes the provider wraps the application's `gdk_seat_get_slaves()`
+  and `gdk_device_get_associated_device()` imports and announces new
+  devices on the seat; see [`src/wintab/gtk_glue.h`](src/wintab/gtk_glue.h).
 
 Axes as GIMP sees them:
 
@@ -91,6 +93,19 @@ The tests need no tablet, no OpenTabletDriver and no GIMP:
 
 Run one provider test on its own with
 `build\selftest.exe build\otd-wintab32.dll <test-name>`.
+
+### GTK integration test
+
+`.\scripts\test-gtk.ps1` runs a small GTK 3 application on a real GTK 3
+runtime (GIMP 3's, found automatically) with otd-wintab injected exactly as
+into GIMP. It reproduces GIMP 3's input-device logic (device lookup from
+events, disabled mice falling back to the core pointer, stroke grabs),
+plays scripted styli through the ring and moves the real mouse, and checks
+after each step which device GIMP would make current: pen, mouse after
+lifting, airbrush, back to a known pen, a pen leaving with its tip down,
+eraser. It takes over the mouse pointer for about ten seconds. Set
+`OTD_GTKPROBE_VERBOSE=1` to print every pointer event with its source
+device, and pass `-Log` for the provider's trace.
 
 ## Trying it in GIMP
 

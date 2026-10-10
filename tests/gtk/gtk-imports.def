@@ -1,0 +1,35 @@
+; Functions tests/gtk/gtkprobe.c imports from the GTK 3 runtime, one
+; section per DLL (split by scripts/test-gtk.ps1 into import libraries).
+[libgtk-3-0.dll]
+gtk_init
+gtk_window_new
+gtk_window_set_title
+gtk_window_set_default_size
+gtk_window_move
+gtk_window_set_keep_above
+gtk_window_present
+gtk_widget_add_events
+gtk_widget_show_all
+gtk_widget_get_window
+gtk_events_pending
+gtk_main_iteration_do
+[libgdk-3-0.dll]
+gdk_display_get_default
+gdk_display_get_default_seat
+gdk_seat_get_pointer
+gdk_seat_get_slaves
+gdk_event_get_source_device
+gdk_event_get_event_type
+gdk_event_get_axis
+gdk_device_get_name
+gdk_device_get_mode
+gdk_device_set_mode
+gdk_device_get_device_type
+gdk_device_get_source
+gdk_device_get_associated_device
+gdk_window_get_origin
+gdk_window_get_scale_factor
+[libgobject-2.0-0.dll]
+g_signal_connect_data
+[libglib-2.0-0.dll]
+g_list_free

@@ -14,6 +14,15 @@
  *  - a GLib timer on the main loop emits the seat's "device-added" for each
  *    Wintab device once, so devices that appear later get picked up.
  *
+ * GTK 3 also sets the *system pointer's* associated device to each new
+ * Wintab device (instead of associating the Wintab device with the core
+ * pointer). Applications that map a disabled mouse to its associated
+ * device, as GIMP does to fall back to the core pointer, then attribute
+ * plain mouse events to the most recently created pen. The application's
+ * import of gdk_device_get_associated_device is wrapped so that a slave
+ * device never resolves to a floating (Wintab) device, but to the seat's
+ * pointer.
+ *
  * Copyright 2026 otd-wintab contributors
  *
  * This library is free software; you can redistribute it and/or
@@ -39,10 +48,14 @@ struct gtk_api
     glue_list *(*seat_get_slaves)(void *seat, int capabilities);   /* the real one */
     void       (*list_free)(glue_list *list);
     glue_list *(*list_append)(glue_list *list, void *data);
+    void      *(*seat_get_pointer)(void *seat);
+    void      *(*device_get_associated_device)(void *device);   /* the real one */
+    int        (*device_get_device_type)(void *device);
     void       (*signal_emit_by_name)(void *instance, const char *signal, ...);
     unsigned   (*timeout_add)(unsigned interval_ms, int (*fn)(void *), void *data);
 };
 
+#define GLUE_DEVICE_TYPE_SLAVE      1   /* GDK_DEVICE_TYPE_SLAVE */
 #define GLUE_DEVICE_TYPE_FLOATING   2   /* GDK_DEVICE_TYPE_FLOATING */
 #define GLUE_SEAT_CAPABILITY_ALL    15  /* GDK_SEAT_CAPABILITY_ALL */
 #define GLUE_SEAT_CAPABILITY_PENS   (1 | 4) /* POINTER | TABLET_STYLUS */
@@ -61,6 +74,10 @@ int gtk_glue_scan(struct gtk_glue *glue);
 /* Appends floating devices missing from `slaves` (a gdk_seat_get_slaves
  * result for `capabilities`) and returns the new list head. */
 glue_list *gtk_glue_extend_slaves(struct gtk_glue *glue, glue_list *slaves, int capabilities);
+
+/* Given `device` and the associated device GTK reported for it, returns
+ * the one the application should see (see above). */
+void *gtk_glue_fix_associated(struct gtk_glue *glue, void *device, void *associated);
 
 /* Starts the periodic scan if this process uses GTK 3. Safe to call
  * from any thread, more than once. Disabled by OTD_WINTAB_NO_GTK_GLUE=1. */

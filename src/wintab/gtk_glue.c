@@ -81,6 +81,20 @@ glue_list *gtk_glue_extend_slaves(struct gtk_glue *glue, glue_list *slaves, int 
     return slaves;
 }
 
+void *gtk_glue_fix_associated(struct gtk_glue *glue, void *device, void *associated)
+{
+    const struct gtk_api *api = &glue->api;
+    void *display, *seat;
+
+    if (!device || !associated) return associated;
+    if (api->device_get_device_type(device) != GLUE_DEVICE_TYPE_SLAVE ||
+        api->device_get_device_type(associated) != GLUE_DEVICE_TYPE_FLOATING)
+        return associated;
+    if (!(display = api->display_get_default())) return associated;
+    if (!(seat = api->display_get_default_seat(display))) return associated;
+    return api->seat_get_pointer(seat);
+}
+
 /* ---- runtime binding to the GTK in this process ----------------------- */
 
 static struct gtk_glue the_glue;
@@ -97,6 +111,12 @@ static glue_list *seat_get_slaves_hook(void *seat, int capabilities)
     return gtk_glue_extend_slaves(&the_glue, slaves, capabilities);
 }
 
+static void *get_associated_device_hook(void *device)
+{
+    return gtk_glue_fix_associated(&the_glue, device,
+                                   the_glue.api.device_get_associated_device(device));
+}
+
 static BOOL bind(struct gtk_api *api)
 {
     HMODULE gdk = GetModuleHandleA("libgdk-3-0.dll");
@@ -110,6 +130,9 @@ static BOOL bind(struct gtk_api *api)
     BIND(display_get_device_manager, gdk, "gdk_display_get_device_manager");
     BIND(device_manager_list_devices, gdk, "gdk_device_manager_list_devices");
     BIND(seat_get_slaves, gdk, "gdk_seat_get_slaves");
+    BIND(seat_get_pointer, gdk, "gdk_seat_get_pointer");
+    BIND(device_get_associated_device, gdk, "gdk_device_get_associated_device");
+    BIND(device_get_device_type, gdk, "gdk_device_get_device_type");
     BIND(list_free, glib, "g_list_free");
     BIND(list_append, glib, "g_list_append");
     BIND(timeout_add, glib, "g_timeout_add");
@@ -136,7 +159,9 @@ void gtk_glue_start(void)
      * don't go through the executable's import table */
     wrapped = iat_patch_module(GetModuleHandleW(NULL), "libgdk-3-0.dll",
                                "gdk_seat_get_slaves", (void *)seat_get_slaves_hook);
-    TRACE("GTK glue active, %d gdk_seat_get_slaves import(s) wrapped\n", wrapped);
+    wrapped += iat_patch_module(GetModuleHandleW(NULL), "libgdk-3-0.dll",
+                                "gdk_device_get_associated_device", (void *)get_associated_device_hook);
+    TRACE("GTK glue active, %d import(s) wrapped\n", wrapped);
     /* g_timeout_add is thread-safe; the callback runs on the main loop */
     the_glue.api.timeout_add(250, scan_tick, NULL);
 }
