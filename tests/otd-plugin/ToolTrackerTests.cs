@@ -104,6 +104,30 @@ public class ToolTrackerTests
     }
 
     [Fact]
+    public void Watchdog_stays_off_for_tablets_that_report_leaving()
+    {
+        // an Intuos3 goes quiet for a while during contact; that must not
+        // end the stroke
+        _tracker.ReportsLeaving = true;
+        _tracker.OnToolReport(0x82B, 1, true, 0);
+        _tracker.OnSample(At(1, 1, 0.2f), 1000);
+        _tracker.Tick(1500, 100);
+        Assert.True(_tracker.InProximity);
+        Assert.DoesNotContain(_log.Events, e => e.Type == EventType.ProximityOut);
+    }
+
+    [Fact]
+    public void A_repeated_proximity_packet_mid_stroke_does_not_end_the_stroke()
+    {
+        _tracker.OnToolReport(0x82B, 1, true, 0);
+        _tracker.OnSample(At(1, 1, 0.2f), 1);
+        _tracker.OnToolReport(0x82B, 1, true, 2);      // the tablet repeats itself
+        _tracker.OnSample(At(2, 2, 0.2f), 3);
+        Assert.Single(_log.Events, e => e.Type == EventType.ProximityIn);
+        Assert.DoesNotContain(_log.Events, e => e.Type == EventType.ProximityOut);
+    }
+
+    [Fact]
     public void Watchdog_survives_tick_count_wraparound()
     {
         _tracker.OnSample(At(1, 1), uint.MaxValue - 10);
@@ -124,6 +148,26 @@ public class ToolTrackerTests
         var ins = _log.Events.Where(e => e.Type == EventType.ProximityIn).ToList();
         Assert.Equal(new[] { "Pen", "Pen Eraser" }, ins.Select(e => e.GetName()));
         Assert.All(ins, e => Assert.Equal(0u, e.Serial));
+    }
+
+    [Fact]
+    public void Identity_on_the_sample_wins_without_a_tool_report()
+    {
+        var s = At(1, 1);
+        s.Tool = new ToolIdentity(0x913, 0x06C00017, false);
+        _tracker.OnSample(s, 1);
+        Assert.Equal("Airbrush Pen", _log.Events[0].GetName());
+        Assert.Equal(0x06C00017u, _log.Events[0].Serial);
+    }
+
+    [Fact]
+    public void Identity_on_the_sample_overrides_a_stale_tool_report()
+    {
+        _tracker.OnToolReport(0x823, 1, false, 0);
+        var s = At(1, 1);
+        s.Tool = new ToolIdentity(0x885, 2, false);
+        _tracker.OnSample(s, 1);
+        Assert.Equal("6D Art Pen", _log.Events[0].GetName());
     }
 
     [Fact]

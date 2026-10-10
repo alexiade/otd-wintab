@@ -53,6 +53,7 @@ struct gtk_api
     int        (*device_get_device_type)(void *device);
     void       (*signal_emit_by_name)(void *instance, const char *signal, ...);
     unsigned   (*timeout_add)(unsigned interval_ms, int (*fn)(void *), void *data);
+    unsigned   (*idle_add)(int (*fn)(void *), void *data);
 };
 
 #define GLUE_DEVICE_TYPE_SLAVE      1   /* GDK_DEVICE_TYPE_SLAVE */
@@ -82,5 +83,11 @@ void *gtk_glue_fix_associated(struct gtk_glue *glue, void *device, void *associa
 /* Starts the periodic scan if this process uses GTK 3. Safe to call
  * from any thread, more than once. Disabled by OTD_WINTAB_NO_GTK_GLUE=1. */
 void gtk_glue_start(void);
+
+/* A new cursor's messages have just been posted: scan as soon as GTK has
+ * handled them (an idle callback runs after pending window messages), so a
+ * new stylus's first stroke isn't lost waiting for the periodic scan. Any
+ * thread. */
+void gtk_glue_kick(void);
 
 #endif

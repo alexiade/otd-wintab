@@ -306,13 +306,16 @@ static void handle_event(const otdwt_event *ev)
 {
     WTPACKET pkt;
     int curnum;
-    BOOL was_in;
+    BOOL was_in, added = FALSE;
     DWORD held;
 
     AcquireSRWLockExclusive(&cursor_lock);
     curnum = find_cursor(ev);
     if (curnum < 0 && ev->type != OTDWT_EV_PROXIMITY_OUT)
+    {
         curnum = add_cursor(ev);
+        added = curnum >= 0;
+    }
     if (curnum < 0)
     {
         ReleaseSRWLockExclusive(&cursor_lock);
@@ -356,6 +359,11 @@ static void handle_event(const otdwt_event *ev)
         TABLET_DeliverPacket(&pkt, our_device, 0);
         break;
     }
+
+    /* the new cursor's WT_CSRCHANGE is queued now; announce its GTK device
+     * right after GTK has created it */
+    if (added)
+        gtk_glue_kick();
 }
 
 /***********************************************************************

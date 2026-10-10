@@ -139,6 +139,43 @@ public class OutputModeTests : IDisposable
     }
 
     [Fact]
+    public void Pen_hovering_while_the_driver_starts_keeps_its_identity()
+    {
+        // as seen on a real PTZ-630: the proximity packet reached the parser
+        // before OpenTabletDriver had the output mode set up
+        _parser.Parse(P.Enter(0x885, 0x0520004F));
+        Feed(P.Pen(100, 100, 0));
+        Feed(P.Rotation(100, 100, 700));
+        Feed(P.Exit());
+
+        var ev = Published();
+        Assert.Equal(EventType.ProximityIn, ev[0].Type);
+        Assert.All(ev, e => Assert.Equal("6D Art Pen", e.GetName()));
+        Assert.All(ev, e => Assert.Equal(0x0520004Fu, e.Serial));
+        Assert.Contains(ev, e => e.Rotation != 0);
+    }
+
+    [Fact]
+    public void A_pause_during_contact_does_not_end_the_stroke()
+    {
+        // as seen on a real PTZ-630: reports pause for more than the proximity
+        // timeout while the eraser is pressed, then the tablet repeats its
+        // proximity packet and carries on
+        Feed(P.Enter(0x82B, 0x0790416B));
+        Feed(P.Pen(100, 100, 1000));
+        Thread.Sleep(_mode.ProximityTimeout * 3);     // the watchdog runs every 25 ms
+        Feed(P.Enter(0x82B, 0x0790416B));
+        Feed(P.Pen(110, 110, 1000));
+        Feed(P.Exit());
+
+        var types = Published().Select(e => e.Type).ToList();
+        Assert.Single(types, t => t == EventType.ProximityIn);
+        Assert.Single(types, t => t == EventType.ProximityOut);
+        Assert.Equal(EventType.ProximityOut, types.Last());
+        Assert.True(_mode.Tracker!.ReportsLeaving);
+    }
+
+    [Fact]
     public void Express_keys_and_unknown_packets_publish_nothing()
     {
         var pad = new byte[10];

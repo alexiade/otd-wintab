@@ -60,6 +60,8 @@ public class ParserTests
         Assert.Equal(new[] { true, false }, r.PenButtons);
         Assert.Equal(9u, r.HoverDistance);
         Assert.False(r.Eraser);
+        Assert.Equal(0x823u, r.ToolId);         // every pen report names its tool
+        Assert.Equal(1ul, r.ToolSerial);
     }
 
     [Fact]

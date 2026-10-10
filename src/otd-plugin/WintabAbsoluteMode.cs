@@ -31,7 +31,7 @@ public class WintabAbsoluteMode : AbsoluteOutputMode
 
     [Property("Proximity timeout"), Unit("ms"), DefaultPropertyValue(100),
      ToolTip("otd-wintab:\n\nTreat the pen as lifted after this long without a report.\n" +
-             "Only matters for tablets whose parser doesn't report leaving.")]
+             "Only used for tablets whose parser doesn't report leaving; off for Intuos3 with the otd-wintab parser.")]
     public int ProximityTimeout { set; get; } = 100;
 
     [Property("Tip threshold"), Unit("%"), DefaultPropertyValue(1f),
@@ -57,6 +57,12 @@ public class WintabAbsoluteMode : AbsoluteOutputMode
     {
         var tracker = _tracker ??= CreateTracker();
         uint now = (uint)Environment.TickCount;
+
+        // the watchdog is only for parsers that never report leaving: ours do
+        // (they also name the tool on every report), and so does any tablet
+        // that has sent an out-of-range once
+        if (report is IToolIdentityReport or IToolLeavingReport or OutOfRangeReport)
+            tracker.ReportsLeaving = true;
 
         if (report is IToolReport tool)
             tracker.OnToolReport(tool.RawToolID, tool.Serial, tool.Tool == ToolType.Eraser, now);
@@ -84,6 +90,9 @@ public class WintabAbsoluteMode : AbsoluteOutputMode
                 Eraser = report is IEraserReport eraser ? eraser.Eraser : null,
                 Wheel = report is IAirbrushWheelReport wheel ? wheel.Wheel : null,
                 Rotation = report is IBarrelRotationReport rotation ? rotation.Rotation : null,
+                Tool = report is IToolIdentityReport id && id.ToolId != 0
+                    ? new ToolIdentity(id.ToolId, (uint)id.ToolSerial, id.IsEraserEnd)
+                    : null,
             };
             tracker.OnSample(sample, now);
 
@@ -103,6 +112,8 @@ public class WintabAbsoluteMode : AbsoluteOutputMode
         Log.Write(LogGroup, $"publishing tool events for {Tablet?.Properties.Name ?? "tablet"}");
         return tracker;
     }
+
+    internal ToolTracker? Tracker => _tracker;
 
     protected override void Dispose(bool disposing)
     {

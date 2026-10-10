@@ -99,10 +99,24 @@ void *gtk_glue_fix_associated(struct gtk_glue *glue, void *device, void *associa
 
 static struct gtk_glue the_glue;
 
+static volatile LONG glue_active;
+
 static int scan_tick(void *unused)
 {
     gtk_glue_scan(&the_glue);
     return 1;   /* G_SOURCE_CONTINUE */
+}
+
+static int scan_once(void *unused)
+{
+    gtk_glue_scan(&the_glue);
+    return 0;   /* G_SOURCE_REMOVE */
+}
+
+void gtk_glue_kick(void)
+{
+    if (glue_active)
+        the_glue.api.idle_add(scan_once, NULL);
 }
 
 static glue_list *seat_get_slaves_hook(void *seat, int capabilities)
@@ -136,6 +150,7 @@ static BOOL bind(struct gtk_api *api)
     BIND(list_free, glib, "g_list_free");
     BIND(list_append, glib, "g_list_append");
     BIND(timeout_add, glib, "g_timeout_add");
+    BIND(idle_add, glib, "g_idle_add");
     BIND(signal_emit_by_name, gobject, "g_signal_emit_by_name");
 #undef BIND
     return TRUE;
@@ -162,6 +177,7 @@ void gtk_glue_start(void)
     wrapped += iat_patch_module(GetModuleHandleW(NULL), "libgdk-3-0.dll",
                                 "gdk_device_get_associated_device", (void *)get_associated_device_hook);
     TRACE("GTK glue active, %d import(s) wrapped\n", wrapped);
-    /* g_timeout_add is thread-safe; the callback runs on the main loop */
+    /* g_timeout_add/g_idle_add are thread-safe; callbacks run on the main loop */
     the_glue.api.timeout_add(250, scan_tick, NULL);
+    InterlockedExchange(&glue_active, 1);
 }

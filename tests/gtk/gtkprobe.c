@@ -83,12 +83,17 @@ static void *current;               /* gimp_device_manager_get_current_device */
 static void *grab_source;           /* shell->grab_pointer_source */
 static int ignored_while_grabbed;
 static BOOL verbose;                /* OTD_GTKPROBE_VERBOSE=1: print every event */
+static BOOL os_button_down;         /* the real left mouse button, see os_button() */
 
 struct step_stats
 {
     int presses, releases, motions;
     double max_pressure, max_wheel;
     void *pressed_on;
+    /* Wheel axis range seen while hovering and while pressed */
+    double hover_wheel_min, hover_wheel_max, down_wheel_min, down_wheel_max;
+    int hover_wheel_n, down_wheel_n;
+    int pen_events_down, core_events_down;  /* while the OS button is held */
 };
 static struct step_stats st;
 
@@ -151,6 +156,12 @@ static gboolean on_event(void *widget, void *event, void *data)
                gdk_device_get_name(gdk_event_get_source_device(event)) : "(none)");
     if (!(d = device_from_event(event))) return FALSE;
 
+    if (os_button_down)
+    {
+        if (d == core_pointer) st.core_events_down++;
+        else st.pen_events_down++;
+    }
+
     /* while a stroke holds the grab, other devices are ignored */
     if (grab_source && d != grab_source)
     {
@@ -177,7 +188,17 @@ static gboolean on_event(void *widget, void *event, void *data)
         st.motions++;
 
     if (gdk_event_get_axis(event, GDK_AXIS_PRESSURE, &v) && v > st.max_pressure) st.max_pressure = v;
-    if (gdk_event_get_axis(event, GDK_AXIS_WHEEL, &v) && v > st.max_wheel) st.max_wheel = v;
+    if (gdk_event_get_axis(event, GDK_AXIS_WHEEL, &v))
+    {
+        BOOL down = grab_source != NULL;
+        double *mn = down ? &st.down_wheel_min : &st.hover_wheel_min;
+        double *mx = down ? &st.down_wheel_max : &st.hover_wheel_max;
+        int *n = down ? &st.down_wheel_n : &st.hover_wheel_n;
+        if (!*n || v < *mn) *mn = v;
+        if (!*n || v > *mx) *mx = v;
+        (*n)++;
+        if (v > st.max_wheel) st.max_wheel = v;
+    }
     return FALSE;
 }
 
@@ -210,6 +231,17 @@ static void mouse_to(int x, int y)
     SendInput(1, &in, sizeof(in));
 }
 
+/* OpenTabletDriver's tip binding: the real left mouse button follows the tip */
+static void os_button(BOOL down)
+{
+    INPUT in = {0};
+    if (down == os_button_down) return;
+    in.type = INPUT_MOUSE;
+    in.mi.dwFlags = down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
+    SendInput(1, &in, sizeof(in));
+    os_button_down = down;
+}
+
 static void mouse_wiggle(void)
 {
     int i;
@@ -225,6 +257,9 @@ struct tool { const char *name; uint32_t tool_id, serial, flags, axes; };
 static const struct tool GRIP   = { "Grip Pen", 0x823, 0xA001, 0, OTDWT_AX_PRESSURE | OTDWT_AX_TILT };
 static const struct tool ERASER = { "Grip Pen Eraser", 0x82b, 0xA001, OTDWT_F_ERASER, OTDWT_AX_PRESSURE | OTDWT_AX_TILT };
 static const struct tool AIR    = { "Airbrush", 0x913, 0xB002, 0, OTDWT_AX_PRESSURE | OTDWT_AX_TILT | OTDWT_AX_WHEEL };
+static const struct tool ART    = { "6D Art Pen", 0x885, 0xC003, 0, OTDWT_AX_PRESSURE | OTDWT_AX_TILT | OTDWT_AX_ROTATION };
+
+static int32_t pen_rotation;        /* tenths of a degree, for the next events */
 
 static void pen(uint32_t type, const struct tool *t, int x, int y, uint32_t pressure)
 {
@@ -240,6 +275,7 @@ static void pen(uint32_t type, const struct tool *t, int x, int y, uint32_t pres
     ev.pressure = pressure;
     ev.tilt_x = 150;
     ev.wheel = 600;
+    ev.rotation = pen_rotation;
     ev.time_ms = GetTickCount();
     strncpy(ev.name, t->name, OTDWT_NAME_LEN - 1);
     ring_publish(&ring, &ev);
@@ -255,18 +291,48 @@ static void pen_stroke(const struct tool *t, BOOL lift_tip)
     pump(60);
     for (i = 0; i < 20; i++)
     {
+        BOOL down = i > 2 && i < 17;
         x += 8; y += 3;
         mouse_to(x, y);
-        pen(OTDWT_EV_PACKET, t, x, y, (i > 2 && i < 17) ? 20000 : 0);
+        pen(OTDWT_EV_PACKET, t, x, y, down ? 20000 : 0);
+        os_button(down);
         pump(15);
     }
     if (!lift_tip)
     {
         pen(OTDWT_EV_PACKET, t, x, y, 20000);    /* tip goes down again ... */
+        os_button(TRUE);
         pump(30);
     }
     pen(OTDWT_EV_PROXIMITY_OUT, t, x, y, 0);     /* ... and the pen leaves */
+    os_button(FALSE);                            /* the fixed parser releases it */
     pump(150);
+}
+
+/* the Art Pen turning its barrel: hovering, then with the tip down */
+static void art_pen_twisting(void)
+{
+    int i, x = win_x + 150, y = win_y + 120;
+
+    pen_rotation = 0;
+    mouse_to(x, y);
+    pen(OTDWT_EV_PROXIMITY_IN, &ART, x, y, 0);
+    pump(60);
+    for (i = 0; i < 40; i++)
+    {
+        x += 4; y += 2;
+        pen_rotation = (i * 85) % 3600;     /* keeps turning throughout */
+        mouse_to(x, y);
+        pen(OTDWT_EV_PACKET, &ART, x, y, i >= 20 ? 20000 : 0);
+        os_button(i >= 20);
+        pump(15);
+    }
+    pen(OTDWT_EV_PACKET, &ART, x, y, 0);
+    os_button(FALSE);
+    pump(60);                               /* hover a moment before leaving */
+    pen(OTDWT_EV_PROXIMITY_OUT, &ART, x, y, 0);
+    pump(150);
+    pen_rotation = 0;
 }
 
 static const char *name_of(void *d) { return d ? gdk_device_get_name(d) : "(none)"; }
@@ -344,6 +410,9 @@ int main(void)
     expect_current("grip pen stroke", "Grip Pen #0000A001", NULL);
     expect(st.presses >= 1 && st.releases >= 1, "pen press and release delivered");
     expect(st.max_pressure > 0.1, "pressure reaches the application");
+    expect(st.pen_events_down > 0 && st.core_events_down == 0,
+           "while the tip is down, events come from the pen, not the core pointer");
+    printf("    tip down: %d pen events, %d core pointer events\n", st.pen_events_down, st.core_events_down);
 
     begin(); mouse_wiggle();
     expect_current("pen lifted, mouse moves", NULL, core_pointer);
@@ -366,9 +435,20 @@ int main(void)
     begin(); pen_stroke(&ERASER, TRUE);
     expect_current("eraser end", "Grip Pen Eraser #0000A001", NULL);
 
+    begin(); art_pen_twisting();
+    expect_current("art pen twisting", "6D Art Pen #0000C003", NULL);
+    printf("    rotation (Wheel axis) hovering: %d events, %.3f..%.3f; tip down: %d events, %.3f..%.3f\n",
+           st.hover_wheel_n, st.hover_wheel_min, st.hover_wheel_max,
+           st.down_wheel_n, st.down_wheel_min, st.down_wheel_max);
+    expect(st.hover_wheel_n > 0 && st.hover_wheel_max - st.hover_wheel_min > 0.1,
+           "rotation changes while hovering");
+    expect(st.down_wheel_n > 0 && st.down_wheel_max - st.down_wheel_min > 0.1,
+           "rotation keeps changing with the tip down");
+
     begin(); mouse_wiggle();
     expect_current("mouse at the end", NULL, core_pointer);
 
+    os_button(FALSE);
     SetCursorPos(saved.x, saved.y);
     ring_close(&ring);
     printf("\n%s (%d failure(s), %d events ignored during grabs)\n",

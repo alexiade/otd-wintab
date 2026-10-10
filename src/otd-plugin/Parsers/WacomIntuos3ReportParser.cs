@@ -100,6 +100,8 @@ public class WacomIntuos3ReportParser : IReportParser<IDeviceReport>
                 PenButtons = new bool[2],
                 Tilt = _tilt,
                 Eraser = (_toolId & 0x0008) != 0,
+                ToolId = _toolId,
+                ToolSerial = _serial,
                 NearProximity = false,
             };
             _toolId = 0;
@@ -154,6 +156,8 @@ public class WacomIntuos3ReportParser : IReportParser<IDeviceReport>
         report.Tilt = _tilt;
         report.PenButtons = _penButtons;
         report.Eraser = (_toolId & 0x0008) != 0;
+        report.ToolId = _toolId;
+        report.ToolSerial = _serial;
         report.NearProximity = true;
         report.HoverDistance = distance;
         return report;
@@ -192,9 +196,12 @@ public class IntuosToolReport : IToolReport
     public ToolType Tool { set; get; }
 }
 
-public class IntuosPenReport : ITabletReport, ITiltReport, IEraserReport, IProximityReport
+public class IntuosPenReport : ITabletReport, ITiltReport, IEraserReport, IProximityReport, IToolIdentityReport
 {
     public byte[] Raw { set; get; } = Array.Empty<byte>();
+    public uint ToolId { set; get; }
+    public ulong ToolSerial { set; get; }
+    public bool IsEraserEnd => Eraser;
     public Vector2 Position { set; get; }
     public uint Pressure { set; get; }
     public bool[] PenButtons { set; get; } = Array.Empty<bool>();

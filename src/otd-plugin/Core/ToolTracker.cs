@@ -23,6 +23,7 @@ public struct PenSample
     public bool? Eraser;        // from the report, when the tablet flags it
     public float? Wheel;        // 0..1 (airbrush finger wheel)
     public float? Rotation;     // degrees 0..360 (barrel rotation)
+    public ToolIdentity? Tool;  // when the report itself names the tool
 }
 
 public sealed class ToolTracker
@@ -47,6 +48,13 @@ public sealed class ToolTracker
     }
 
     public bool InProximity { get { lock (_lock) return _inProximity; } }
+
+    /// <summary>
+    /// The tablet reports leaving proximity itself, so silence means nothing:
+    /// a tablet may go quiet for a while during contact (an Intuos3 does, and
+    /// then repeats its proximity packet). Turns the watchdog off.
+    /// </summary>
+    public bool ReportsLeaving { get; set; }
 
     /// <summary>The tablet identified the tool entering proximity.</summary>
     public void OnToolReport(uint toolId, ulong serial, bool eraser, uint nowMs)
@@ -87,7 +95,7 @@ public sealed class ToolTracker
     {
         lock (_lock)
         {
-            if (_inProximity && unchecked(nowMs - _lastReportMs) >= timeoutMs)
+            if (_inProximity && !ReportsLeaving && unchecked(nowMs - _lastReportMs) >= timeoutMs)
                 Leave(nowMs);
         }
     }
@@ -95,6 +103,11 @@ public sealed class ToolTracker
     private ToolIdentity Resolve(in PenSample s)
     {
         bool eraser = s.Eraser == true;
+        if (s.Tool is { } own)          // the report names its tool: authoritative
+        {
+            _reported = own;
+            return own with { Eraser = own.Eraser || eraser };
+        }
         if (_reported is { } r)
             return r with { Eraser = r.Eraser || eraser };
         return new ToolIdentity(0, 0, eraser);
