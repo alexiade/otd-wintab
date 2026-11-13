@@ -93,7 +93,8 @@ typedef struct tagWTI_DEVICES_INFO
  * provider; a pass-through layer will place real devices before us. */
 static UINT our_device = 0;
 
-static LOGCONTEXTW      gSysContext;
+static LOGCONTEXTW      gSysContext;    /* default system context: output in screen pixels */
+static LOGCONTEXTW      gDigContext;    /* default digitizing context: output in device units */
 static WTI_DEVICES_INFO gSysDevice;
 static WTI_CURSORS_INFO gSysCursor[CURSORMAX];
 static UINT             gNumCursors;
@@ -146,6 +147,16 @@ static void setup_device(void)
     gSysContext.lcSysExtY = vh;
     gSysContext.lcSysSensX = 65536;
     gSysContext.lcSysSensY = 65536;
+
+    /* Digitizing context: device units in and out, not a system context.
+     * System context: as with Wacom's and Huion's drivers its output is in
+     * screen pixels (lcOutExt = lcSysExt). Applications such as Rebelle scale
+     * the default system context's output and read the result as pixels. */
+    gDigContext = gSysContext;
+    gDigContext.lcOptions = 0;
+    gDigContext.lcLocks &= ~CXL_SYSOUT;
+    gSysContext.lcOutExtX = vw;
+    gSysContext.lcOutExtY = vh;
 
     wcscpy(gSysDevice.NAME, L"OpenTabletDriver");
     wcscpy(gSysDevice.PNPID, L"non-plug-n-play");
@@ -628,11 +639,14 @@ UINT backend_info(UINT category, UINT index, void *out)
         return 0;
 
     case WTI_DEFCONTEXT:
+        return context_info(&gDigContext, index, out);
     case WTI_DEFSYSCTX:
         return context_info(&gSysContext, index, out);
     }
 
-    if (category == WTI_DDCTXS + our_device || category == WTI_DSCTXS + our_device)
+    if (category == WTI_DDCTXS + our_device)
+        return context_info(&gDigContext, index, out);
+    if (category == WTI_DSCTXS + our_device)
         return context_info(&gSysContext, index, out);
 
     if (category == WTI_DEVICES + our_device)

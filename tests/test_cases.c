@@ -166,6 +166,52 @@ static void info_system_context_is_virtual_desktop(void)
     CHECK_EQ_U(ext, GetSystemMetrics(SM_CYVIRTUALSCREEN));
 }
 
+/* as Wacom: the default system context outputs screen pixels, the default
+ * digitizing context device units. Rebelle opens the system context with ten
+ * times its output extents and reads packet / 10 as screen pixels. */
+static void coords_system_context_in_pixels(void)
+{
+    HWND hwnd = make_window();
+    struct msg_log log = {0};
+    LOGCONTEXTA sys, dig;
+    AXIS ax;
+    const PACKET *p = NULL;
+    HCTX h;
+    int i;
+
+    wt.InfoA(WTI_DEFSYSCTX, 0, &sys);
+    wt.InfoA(WTI_DEFCONTEXT, 0, &dig);
+    wt.InfoA(WTI_DEVICES, DVC_X, &ax);
+    CHECK_EQ_U(sys.lcOutExtX, sys.lcSysExtX);
+    CHECK_EQ_U(sys.lcOutExtY, sys.lcSysExtY);
+    CHECK(sys.lcOptions & CXO_SYSTEM, "system context has CXO_SYSTEM");
+    CHECK_EQ_U(dig.lcOutExtX, ax.axMax - ax.axMin + 1);
+    CHECK(!(dig.lcOptions & CXO_SYSTEM), "digitizing context is not a system context");
+
+    sys.lcOptions |= CXO_MESSAGES | CXO_CSRMESSAGES;
+    sys.lcPktData = sys.lcMoveMask = PACKETDATA;
+    sys.lcPktMode = 0;
+    sys.lcOutExtX *= 10;
+    sys.lcOutExtY = -sys.lcOutExtY * 10;
+    h = wt.OpenA(hwnd, &sys, TRUE);
+    CHECK(h != NULL, "open the scaled system context");
+    wt.QueueSizeSet(h, 128);
+    settle();
+    emit(OTDWT_EV_PROXIMITY_IN, &GRIP_PEN, 1234, 567, 0);
+    emit(OTDWT_EV_PACKET, &GRIP_PEN, 1234, 567, 900);
+    emit(OTDWT_EV_PROXIMITY_OUT, &GRIP_PEN, 1234, 567, 0);
+    pump(&log, 300);
+
+    for (i = 0; i < log.npackets; i++)
+        if (log.packets[i].npressure) p = &log.packets[i];
+    CHECK(p != NULL, "pressed packet received");
+    if (p)
+    {
+        CHECK_EQ_U(p->x / 10, 1234 - GetSystemMetrics(SM_XVIRTUALSCREEN));
+        CHECK_EQ_U(p->y / 10, 567 - GetSystemMetrics(SM_YVIRTUALSCREEN));
+    }
+}
+
 /* unidentified tools use the Wacom/Huion layout: 0 puck, 1 pen, 2 eraser */
 static void cursors_generic_wacom_layout(void)
 {
@@ -769,6 +815,7 @@ const struct test_case test_cases[] =
     T(cursors_without_serial, TRUE),
     T(cursors_generic_wacom_layout, TRUE),
     T(info_system_context_is_virtual_desktop, TRUE),
+    T(coords_system_context_in_pixels, TRUE),
     T(cursors_attributes, TRUE),
     T(cursors_unknown_proximity_out, TRUE),
     T(cursors_slot_limit, TRUE),
