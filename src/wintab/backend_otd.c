@@ -187,14 +187,53 @@ static void setup_device(void)
 /***********************************************************************
  * dynamic cursors
  */
+
+/* Tablets that don't identify their tools (tool_id 0: Huion, XP-Pen, ...)
+ * get the layout Wacom's and Huion's own Wintab drivers use, which
+ * applications such as Clip Studio Paint rely on to tell the eraser end from
+ * the tip: cursor 0 is the puck, 1 the pen, 2 the eraser, with the Wacom
+ * cursor types of a generic pen (0x822) and its eraser (0x82A, bit 3). */
+#define GENERIC_PEN_TYPE    0x822
+#define GENERIC_ERASER_TYPE 0x82A
+
+static UINT effective_type(const otdwt_event *ev)
+{
+    if (ev->tool_id) return ev->tool_id;
+    return (ev->flags & OTDWT_F_ERASER) ? GENERIC_ERASER_TYPE : GENERIC_PEN_TYPE;
+}
+
 static int find_cursor(const otdwt_event *ev)
 {
-    UINT i;
+    UINT i, type = effective_type(ev);
     for (i = 0; i < gNumCursors; i++)
-        if (gSysCursor[i].TYPE == ev->tool_id && gSysCursor[i].PHYSID == ev->serial &&
+        if (gSysCursor[i].TYPE == type && gSysCursor[i].PHYSID == ev->serial &&
             !!(gSysCursor[i].CAPABILITIES & CRC_INVERT) == !!(ev->flags & OTDWT_F_ERASER))
             return i;
     return -1;
+}
+
+static int add_cursor(const otdwt_event *ev);
+
+/* first unidentified tool on a fresh provider: lay out puck, pen and eraser */
+static BOOL add_generic_layout(const otdwt_event *ev)
+{
+    otdwt_event pen = *ev, eraser = *ev;
+    LPWTI_CURSORS_INFO puck;
+
+    if (ev->tool_id || gNumCursors != 0 || CURSORMAX < 3) return FALSE;
+
+    puck = &gSysCursor[0];
+    memset(puck, 0, sizeof(*puck));
+    lstrcpynW(puck->NAME, L"Puck", WT_MAX_NAME_LEN);
+    puck->ACTIVE = FALSE;            /* placeholder: never sends packets */
+    puck->PKTDATA = BASE_PKTDATA;
+    gSysDevice.NCSRTYPES = ++gNumCursors;
+
+    pen.flags &= ~OTDWT_F_ERASER;
+    if (ev->flags & OTDWT_F_ERASER) pen.name[0] = 0;
+    eraser.flags |= OTDWT_F_ERASER;
+    if (!(ev->flags & OTDWT_F_ERASER)) eraser.name[0] = 0;
+    return add_cursor(&pen) == 1 && add_cursor(&eraser) == 2;
 }
 
 static int add_cursor(const otdwt_event *ev)
@@ -238,7 +277,7 @@ static int add_cursor(const otdwt_event *ev)
     c->NPBTNMARKS[0] = 0;
     c->NPBTNMARKS[1] = 1;
     c->PHYSID = ev->serial;
-    c->TYPE = ev->tool_id;
+    c->TYPE = effective_type(ev);
     c->CAPABILITIES = CRC_MULTIMODE | ((ev->flags & OTDWT_F_ERASER) ? CRC_INVERT : 0);
 
     TRACE("new cursor %u: %s (tool %#x serial %#x)\n", gNumCursors, name, ev->tool_id, ev->serial);
@@ -313,7 +352,10 @@ static void handle_event(const otdwt_event *ev)
     curnum = find_cursor(ev);
     if (curnum < 0 && ev->type != OTDWT_EV_PROXIMITY_OUT)
     {
-        curnum = add_cursor(ev);
+        if (add_generic_layout(ev))
+            curnum = find_cursor(ev);
+        else
+            curnum = add_cursor(ev);
         added = curnum >= 0;
     }
     if (curnum < 0)

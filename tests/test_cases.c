@@ -144,8 +144,50 @@ static void cursors_without_serial(void)
     stroke(&NO_SERIAL_PEN, 1);
     pump(&log, 300);
 
-    wt.InfoA(WTI_CURSORS, CSR_NAME, buf);
+    wt.InfoA(WTI_CURSORS + 1, CSR_NAME, buf);   /* slot 0 is the puck, see below */
     CHECK_EQ_S(buf, "Pen");
+}
+
+/* unidentified tools use the Wacom/Huion layout: 0 puck, 1 pen, 2 eraser */
+static void cursors_generic_wacom_layout(void)
+{
+    static const struct tool generic_eraser = { "Pen Eraser", 0x000, 0, OTDWT_F_ERASER, OTDWT_AX_PRESSURE | OTDWT_AX_TILT };
+    HWND hwnd = make_window();
+    struct msg_log log = {0};
+    UINT type, caps, n = 0, pen_cursor = 99, eraser_cursor = 99, status = 0;
+    BOOL active = TRUE;
+    char buf[256];
+    int i;
+
+    open_context(hwnd, 0, 0, 0, 64);
+    settle();
+    stroke(&generic_eraser, 1);      /* eraser end first: slots must not depend on order */
+    stroke(&NO_SERIAL_PEN, 1);
+    pump(&log, 300);
+
+    wt.InfoA(WTI_INTERFACE, IFC_NCURSORS, &n);
+    CHECK_EQ_U(n, 3);
+    wt.InfoA(WTI_CURSORS + 0, CSR_ACTIVE, &active);
+    CHECK(!active, "slot 0 is an inactive puck placeholder");
+    wt.InfoA(WTI_CURSORS + 1, CSR_TYPE, &type);
+    CHECK_EQ_U(type, 0x822);
+    wt.InfoA(WTI_CURSORS + 1, CSR_CAPABILITIES, &caps);
+    CHECK(!(caps & CRC_INVERT), "pen cursor lacks CRC_INVERT");
+    wt.InfoA(WTI_CURSORS + 2, CSR_TYPE, &type);
+    CHECK_EQ_U(type, 0x82A);
+    wt.InfoA(WTI_CURSORS + 2, CSR_CAPABILITIES, &caps);
+    CHECK(caps & CRC_INVERT, "eraser cursor has CRC_INVERT");
+    wt.InfoA(WTI_CURSORS + 2, CSR_NAME, buf);
+    CHECK_EQ_S(buf, "Pen Eraser");
+
+    for (i = 0; i < log.npackets; i++)
+    {
+        if (log.packets[i].status & TPS_INVERT) { eraser_cursor = log.packets[i].cursor; status |= 2; }
+        else { pen_cursor = log.packets[i].cursor; status |= 1; }
+    }
+    CHECK_EQ_U(status, 3);
+    CHECK_EQ_U(pen_cursor, 1);
+    CHECK_EQ_U(eraser_cursor, 2);
 }
 
 /* cursor attributes reflect the tool's capabilities */
@@ -707,6 +749,7 @@ const struct test_case test_cases[] =
     T(cursors_created_per_tool, TRUE),
     T(cursors_distinguish_serials, TRUE),
     T(cursors_without_serial, TRUE),
+    T(cursors_generic_wacom_layout, TRUE),
     T(cursors_attributes, TRUE),
     T(cursors_unknown_proximity_out, TRUE),
     T(cursors_slot_limit, TRUE),
