@@ -56,7 +56,7 @@ public class WintabAbsoluteMode : AbsoluteOutputMode
     private void Observe(IDeviceReport report)
     {
         var tracker = _tracker ??= CreateTracker();
-        uint now = (uint)Environment.TickCount;
+        uint now = WintabClock.NowMs;
 
         // the watchdog is only for parsers that never report leaving: ours do
         // (they also name the tool on every report), and so does any tablet
@@ -107,7 +107,7 @@ public class WintabAbsoluteMode : AbsoluteOutputMode
         _ring = new RingWriter();
         uint vendor = (uint)(Tablet?.Properties.DigitizerIdentifiers.FirstOrDefault()?.VendorID ?? 0);
         var tracker = new ToolTracker(_ring, StylusDatabase.LoadEmbedded(), vendor);
-        _watchdog = new Timer(_ => tracker.Tick((uint)Environment.TickCount, (uint)Math.Max(ProximityTimeout, 20)),
+        _watchdog = new Timer(_ => tracker.Tick(WintabClock.NowMs, (uint)Math.Max(ProximityTimeout, 20)),
                               null, 25, 25);
         Log.Write(LogGroup, $"publishing tool events for {Tablet?.Properties.Name ?? "tablet"}");
         return tracker;
@@ -120,7 +120,7 @@ public class WintabAbsoluteMode : AbsoluteOutputMode
         if (disposing)
         {
             _watchdog?.Dispose();
-            _tracker?.OnOutOfRange((uint)Environment.TickCount);
+            _tracker?.OnOutOfRange(WintabClock.NowMs);
             _ring?.Dispose();
             _watchdog = null;
             _tracker = null;

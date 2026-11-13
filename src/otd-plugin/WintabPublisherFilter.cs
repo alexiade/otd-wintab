@@ -71,7 +71,7 @@ public sealed class WintabPublisherFilter : IPositionedPipelineElement<IDeviceRe
             s_ring = new RingWriter();
             uint vendor = (uint)(_tablet?.Properties.DigitizerIdentifiers.FirstOrDefault()?.VendorID ?? 0);
             var tracker = new ToolTracker(s_ring, StylusDatabase.LoadEmbedded(), vendor);
-            s_watchdog = new Timer(_ => tracker.Tick((uint)Environment.TickCount, (uint)s_proximityTimeout), null, 25, 25);
+            s_watchdog = new Timer(_ => tracker.Tick(WintabClock.NowMs, (uint)s_proximityTimeout), null, 25, 25);
             Log.Write(LogGroup, $"hybrid: publishing tool events for {_tablet?.Properties.Name ?? "tablet"}");
             return s_tracker = tracker;
         }
@@ -80,7 +80,7 @@ public sealed class WintabPublisherFilter : IPositionedPipelineElement<IDeviceRe
     private void Observe(IDeviceReport report)
     {
         var tracker = Tracker();
-        uint now = (uint)Environment.TickCount;
+        uint now = WintabClock.NowMs;
 
         if (report is IToolIdentityReport or IToolLeavingReport or OutOfRangeReport)
             tracker.ReportsLeaving = true;
