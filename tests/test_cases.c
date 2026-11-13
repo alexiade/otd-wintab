@@ -58,6 +58,29 @@ static void info_probe_before_any_tool(void)
     CHECK_EQ_U(wt.InfoA(WTI_DEVICES + 1, DVC_NAME, NULL), 0); /* no such device */
 }
 
+/* Probing the default contexts of devices that do not exist returns 0 and
+ * leaves the buffer alone (Clip Studio Paint probes WTI_DDCTXS+0..9 and opens
+ * a context for every non-zero answer) */
+static void info_other_devices_contexts_absent(void)
+{
+    LOGCONTEXTA lca;
+    LOGCONTEXTW lcw;
+    UINT n;
+
+    CHECK(wt.InfoA(WTI_DDCTXS, 0, &lca) == sizeof(LOGCONTEXTA), "device 0 digitizing context");
+    CHECK(wt.InfoW(WTI_DDCTXS, 0, &lcw) == sizeof(LOGCONTEXTW), "device 0 digitizing context (W)");
+    CHECK(lcw.lcInExtX > 0 && lcw.lcSysExtX > 0, "device 0 context has extents");
+
+    for (n = 1; n < 10; n++)
+    {
+        memset(&lca, 0xAB, sizeof(lca));
+        CHECK_EQ_U(wt.InfoA(WTI_DDCTXS + n, 0, &lca), 0);
+        CHECK_EQ_U(wt.InfoA(WTI_DSCTXS + n, 0, NULL), 0);
+        CHECK_EQ_U(wt.InfoW(WTI_DDCTXS + n, 0, &lcw), 0);
+        CHECK_EQ_U(((BYTE *)&lca)[0], 0xAB);   /* untouched */
+    }
+}
+
 /* ANSI entry points convert strings, including multi-strings */
 static void info_ansi_strings(void)
 {
@@ -809,6 +832,7 @@ void iat_patch_own_import(void);
 const struct test_case test_cases[] =
 {
     T(info_probe_before_any_tool, TRUE),
+    T(info_other_devices_contexts_absent, TRUE),
     T(info_ansi_strings, TRUE),
     T(cursors_created_per_tool, TRUE),
     T(cursors_distinguish_serials, TRUE),
