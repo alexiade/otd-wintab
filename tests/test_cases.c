@@ -58,6 +58,29 @@ static void info_probe_before_any_tool(void)
     CHECK_EQ_U(wt.InfoA(WTI_DEVICES + 1, DVC_NAME, NULL), 0); /* no such device */
 }
 
+/* Probing the default contexts of devices that do not exist returns 0 and
+ * leaves the buffer alone (Clip Studio Paint probes WTI_DDCTXS+0..9 and opens
+ * a context for every non-zero answer) */
+static void info_other_devices_contexts_absent(void)
+{
+    LOGCONTEXTA lca;
+    LOGCONTEXTW lcw;
+    UINT n;
+
+    CHECK(wt.InfoA(WTI_DDCTXS, 0, &lca) == sizeof(LOGCONTEXTA), "device 0 digitizing context");
+    CHECK(wt.InfoW(WTI_DDCTXS, 0, &lcw) == sizeof(LOGCONTEXTW), "device 0 digitizing context (W)");
+    CHECK(lcw.lcInExtX > 0 && lcw.lcSysExtX > 0, "device 0 context has extents");
+
+    for (n = 1; n < 10; n++)
+    {
+        memset(&lca, 0xAB, sizeof(lca));
+        CHECK_EQ_U(wt.InfoA(WTI_DDCTXS + n, 0, &lca), 0);
+        CHECK_EQ_U(wt.InfoA(WTI_DSCTXS + n, 0, NULL), 0);
+        CHECK_EQ_U(wt.InfoW(WTI_DDCTXS + n, 0, &lcw), 0);
+        CHECK_EQ_U(((BYTE *)&lca)[0], 0xAB);   /* untouched */
+    }
+}
+
 /* ANSI entry points convert strings, including multi-strings */
 static void info_ansi_strings(void)
 {
@@ -144,8 +167,114 @@ static void cursors_without_serial(void)
     stroke(&NO_SERIAL_PEN, 1);
     pump(&log, 300);
 
-    wt.InfoA(WTI_CURSORS, CSR_NAME, buf);
+    wt.InfoA(WTI_CURSORS + 1, CSR_NAME, buf);   /* slot 0 is the puck, see below */
     CHECK_EQ_S(buf, "Pen");
+}
+
+/* the system context covers the whole virtual desktop, like the device axes:
+ * multi-monitor applications (Rebelle) map packets to the screen with it */
+static void info_system_context_is_virtual_desktop(void)
+{
+    LOGCONTEXTA lc;
+    LONG ext = 0;
+
+    CHECK(wt.InfoA(WTI_DEFSYSCTX, 0, &lc) == sizeof(LOGCONTEXTA), "default system context");
+    CHECK_EQ_U(lc.lcSysOrgX, GetSystemMetrics(SM_XVIRTUALSCREEN));
+    CHECK_EQ_U(lc.lcSysOrgY, GetSystemMetrics(SM_YVIRTUALSCREEN));
+    CHECK_EQ_U(lc.lcSysExtX, GetSystemMetrics(SM_CXVIRTUALSCREEN));
+    CHECK_EQ_U(lc.lcSysExtY, GetSystemMetrics(SM_CYVIRTUALSCREEN));
+    wt.InfoA(WTI_DEFSYSCTX, CTX_SYSEXTX, &ext);
+    CHECK_EQ_U(ext, GetSystemMetrics(SM_CXVIRTUALSCREEN));
+    wt.InfoA(WTI_DEFSYSCTX, CTX_SYSEXTY, &ext);
+    CHECK_EQ_U(ext, GetSystemMetrics(SM_CYVIRTUALSCREEN));
+}
+
+/* as Wacom: the default system context outputs screen pixels, the default
+ * digitizing context device units. Rebelle opens the system context with ten
+ * times its output extents and reads packet / 10 as screen pixels. */
+static void coords_system_context_in_pixels(void)
+{
+    HWND hwnd = make_window();
+    struct msg_log log = {0};
+    LOGCONTEXTA sys, dig;
+    AXIS ax;
+    const PACKET *p = NULL;
+    HCTX h;
+    int i;
+
+    wt.InfoA(WTI_DEFSYSCTX, 0, &sys);
+    wt.InfoA(WTI_DEFCONTEXT, 0, &dig);
+    wt.InfoA(WTI_DEVICES, DVC_X, &ax);
+    CHECK_EQ_U(sys.lcOutExtX, sys.lcSysExtX);
+    CHECK_EQ_U(sys.lcOutExtY, sys.lcSysExtY);
+    CHECK(sys.lcOptions & CXO_SYSTEM, "system context has CXO_SYSTEM");
+    CHECK_EQ_U(dig.lcOutExtX, ax.axMax - ax.axMin + 1);
+    CHECK(!(dig.lcOptions & CXO_SYSTEM), "digitizing context is not a system context");
+
+    sys.lcOptions |= CXO_MESSAGES | CXO_CSRMESSAGES;
+    sys.lcPktData = sys.lcMoveMask = PACKETDATA;
+    sys.lcPktMode = 0;
+    sys.lcOutExtX *= 10;
+    sys.lcOutExtY = -sys.lcOutExtY * 10;
+    h = wt.OpenA(hwnd, &sys, TRUE);
+    CHECK(h != NULL, "open the scaled system context");
+    wt.QueueSizeSet(h, 128);
+    settle();
+    emit(OTDWT_EV_PROXIMITY_IN, &GRIP_PEN, 1234, 567, 0);
+    emit(OTDWT_EV_PACKET, &GRIP_PEN, 1234, 567, 900);
+    emit(OTDWT_EV_PROXIMITY_OUT, &GRIP_PEN, 1234, 567, 0);
+    pump(&log, 300);
+
+    for (i = 0; i < log.npackets; i++)
+        if (log.packets[i].npressure) p = &log.packets[i];
+    CHECK(p != NULL, "pressed packet received");
+    if (p)
+    {
+        CHECK_EQ_U(p->x / 10, 1234 - GetSystemMetrics(SM_XVIRTUALSCREEN));
+        CHECK_EQ_U(p->y / 10, 567 - GetSystemMetrics(SM_YVIRTUALSCREEN));
+    }
+}
+
+/* unidentified tools use the Wacom/Huion layout: 0 puck, 1 pen, 2 eraser */
+static void cursors_generic_wacom_layout(void)
+{
+    static const struct tool generic_eraser = { "Pen Eraser", 0x000, 0, OTDWT_F_ERASER, OTDWT_AX_PRESSURE | OTDWT_AX_TILT };
+    HWND hwnd = make_window();
+    struct msg_log log = {0};
+    UINT type, caps, n = 0, pen_cursor = 99, eraser_cursor = 99, status = 0;
+    BOOL active = TRUE;
+    char buf[256];
+    int i;
+
+    open_context(hwnd, 0, 0, 0, 64);
+    settle();
+    stroke(&generic_eraser, 1);      /* eraser end first: slots must not depend on order */
+    stroke(&NO_SERIAL_PEN, 1);
+    pump(&log, 300);
+
+    wt.InfoA(WTI_INTERFACE, IFC_NCURSORS, &n);
+    CHECK_EQ_U(n, 3);
+    wt.InfoA(WTI_CURSORS + 0, CSR_ACTIVE, &active);
+    CHECK(!active, "slot 0 is an inactive puck placeholder");
+    wt.InfoA(WTI_CURSORS + 1, CSR_TYPE, &type);
+    CHECK_EQ_U(type, 0x822);
+    wt.InfoA(WTI_CURSORS + 1, CSR_CAPABILITIES, &caps);
+    CHECK(!(caps & CRC_INVERT), "pen cursor lacks CRC_INVERT");
+    wt.InfoA(WTI_CURSORS + 2, CSR_TYPE, &type);
+    CHECK_EQ_U(type, 0x82A);
+    wt.InfoA(WTI_CURSORS + 2, CSR_CAPABILITIES, &caps);
+    CHECK(caps & CRC_INVERT, "eraser cursor has CRC_INVERT");
+    wt.InfoA(WTI_CURSORS + 2, CSR_NAME, buf);
+    CHECK_EQ_S(buf, "Pen Eraser");
+
+    for (i = 0; i < log.npackets; i++)
+    {
+        if (log.packets[i].status & TPS_INVERT) { eraser_cursor = log.packets[i].cursor; status |= 2; }
+        else { pen_cursor = log.packets[i].cursor; status |= 1; }
+    }
+    CHECK_EQ_U(status, 3);
+    CHECK_EQ_U(pen_cursor, 1);
+    CHECK_EQ_U(eraser_cursor, 2);
 }
 
 /* cursor attributes reflect the tool's capabilities */
@@ -703,10 +832,14 @@ void iat_patch_own_import(void);
 const struct test_case test_cases[] =
 {
     T(info_probe_before_any_tool, TRUE),
+    T(info_other_devices_contexts_absent, TRUE),
     T(info_ansi_strings, TRUE),
     T(cursors_created_per_tool, TRUE),
     T(cursors_distinguish_serials, TRUE),
     T(cursors_without_serial, TRUE),
+    T(cursors_generic_wacom_layout, TRUE),
+    T(info_system_context_is_virtual_desktop, TRUE),
+    T(coords_system_context_in_pixels, TRUE),
     T(cursors_attributes, TRUE),
     T(cursors_unknown_proximity_out, TRUE),
     T(cursors_slot_limit, TRUE),
