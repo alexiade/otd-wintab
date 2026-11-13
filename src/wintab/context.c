@@ -407,7 +407,10 @@ static UINT WTInfoT(UINT wCategory, UINT nIndex, LPVOID lpOutput, BOOL bUnicode)
     TRACE("(%d, %d, %p, %d)\n", wCategory, nIndex, lpOutput, bUnicode);
 
     /*
-     *  Handle system extents here, as we can use user32.dll code to set them.
+     *  System extents: the whole virtual desktop, like the device axes and the
+     *  backend's default contexts (otd-wintab; Wine used the primary screen,
+     *  which made multi-monitor applications such as Rebelle map the pen onto
+     *  the primary screen).
      */
     if(wCategory == WTI_DEFSYSCTX)
     {
@@ -415,13 +418,12 @@ static UINT WTInfoT(UINT wCategory, UINT nIndex, LPVOID lpOutput, BOOL bUnicode)
         {
             case CTX_SYSEXTX:
                 if(lpOutput != NULL)
-                    *(LONG*)lpOutput = GetSystemMetrics(SM_CXSCREEN);
+                    *(LONG*)lpOutput = GetSystemMetrics(SM_CXVIRTUALSCREEN);
                 return sizeof(LONG);
             case CTX_SYSEXTY:
                 if(lpOutput != NULL)
-                    *(LONG*)lpOutput = GetSystemMetrics(SM_CYSCREEN);
+                    *(LONG*)lpOutput = GetSystemMetrics(SM_CYVIRTUALSCREEN);
                 return sizeof(LONG);
-           /* No action, delegate to X11Drv */
         }
     }
 
@@ -432,11 +434,13 @@ static UINT WTInfoT(UINT wCategory, UINT nIndex, LPVOID lpOutput, BOOL bUnicode)
             LOGCONTEXTW buf;
             DriverInfo(wCategory, nIndex, &buf);
 
-            /*  Handle system extents here, as we can use user32.dll code to set them */
+            /*  System extents: the whole virtual desktop (see above) */
             if(wCategory == WTI_DEFSYSCTX)
             {
-                buf.lcSysExtX = GetSystemMetrics(SM_CXSCREEN);
-                buf.lcSysExtY = GetSystemMetrics(SM_CYSCREEN);
+                buf.lcSysOrgX = GetSystemMetrics(SM_XVIRTUALSCREEN);
+                buf.lcSysOrgY = GetSystemMetrics(SM_YVIRTUALSCREEN);
+                buf.lcSysExtX = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+                buf.lcSysExtY = GetSystemMetrics(SM_CYVIRTUALSCREEN);
             }
 
             if (bUnicode)

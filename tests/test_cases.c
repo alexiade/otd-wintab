@@ -148,6 +148,24 @@ static void cursors_without_serial(void)
     CHECK_EQ_S(buf, "Pen");
 }
 
+/* the system context covers the whole virtual desktop, like the device axes:
+ * multi-monitor applications (Rebelle) map packets to the screen with it */
+static void info_system_context_is_virtual_desktop(void)
+{
+    LOGCONTEXTA lc;
+    LONG ext = 0;
+
+    CHECK(wt.InfoA(WTI_DEFSYSCTX, 0, &lc) == sizeof(LOGCONTEXTA), "default system context");
+    CHECK_EQ_U(lc.lcSysOrgX, GetSystemMetrics(SM_XVIRTUALSCREEN));
+    CHECK_EQ_U(lc.lcSysOrgY, GetSystemMetrics(SM_YVIRTUALSCREEN));
+    CHECK_EQ_U(lc.lcSysExtX, GetSystemMetrics(SM_CXVIRTUALSCREEN));
+    CHECK_EQ_U(lc.lcSysExtY, GetSystemMetrics(SM_CYVIRTUALSCREEN));
+    wt.InfoA(WTI_DEFSYSCTX, CTX_SYSEXTX, &ext);
+    CHECK_EQ_U(ext, GetSystemMetrics(SM_CXVIRTUALSCREEN));
+    wt.InfoA(WTI_DEFSYSCTX, CTX_SYSEXTY, &ext);
+    CHECK_EQ_U(ext, GetSystemMetrics(SM_CYVIRTUALSCREEN));
+}
+
 /* unidentified tools use the Wacom/Huion layout: 0 puck, 1 pen, 2 eraser */
 static void cursors_generic_wacom_layout(void)
 {
@@ -750,6 +768,7 @@ const struct test_case test_cases[] =
     T(cursors_distinguish_serials, TRUE),
     T(cursors_without_serial, TRUE),
     T(cursors_generic_wacom_layout, TRUE),
+    T(info_system_context_is_virtual_desktop, TRUE),
     T(cursors_attributes, TRUE),
     T(cursors_unknown_proximity_out, TRUE),
     T(cursors_slot_limit, TRUE),
