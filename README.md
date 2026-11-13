@@ -39,6 +39,18 @@ tablet ─► OpenTabletDriver ─► otd-wintab plugin ──(shared memory rin
   serial, into the ring ([`include/otdwt_ring.h`](include/otdwt_ring.h)).
   Stylus names and capabilities come from libwacom's database. A proximity
   watchdog covers tablets whose parser never reports the pen leaving.
+* **Hybrid setups.** The plugin also adds a *Wintab publisher (hybrid)*
+  filter that publishes the same events from any absolute output mode.
+  Combined with a Windows Ink output mode (e.g. VoiDPlugins' *Windows Ink
+  Absolute Mode*) it works like vendor drivers: Windows Ink applications
+  (Substance 3D Painter, ...) use the Windows Ink pen while Wintab
+  applications get otd-wintab's packets, without switching output modes.
+* **Tablets that don't identify their tools** (Huion, XP-Pen, ...) get the
+  cursor layout of Wacom's and Huion's own drivers: cursor 1 is the pen
+  (type `0x822`), cursor 2 its eraser (`0x82A`), so applications such as
+  Clip Studio Paint recognise the eraser end. As with those drivers the
+  default system context outputs screen pixels over the whole virtual
+  desktop (Rebelle relies on both).
 * **Intuos3 parser.** OpenTabletDriver's built-in Intuos3 parser misses
   some proximity packets, never reports the pen leaving, mistakes the
   airbrush wheel for a mouse and drops Art Pen rotation. The plugin ships a
